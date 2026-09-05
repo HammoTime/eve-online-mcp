@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { SCHEMA_CHECK_USER_AGENT } from "./package-metadata.js";
 import type { OpenApiDocument } from "./types.js";
 
 export const ESI_OPENAPI_URL = "https://esi.evetech.net/meta/openapi.json";
@@ -83,8 +84,7 @@ export async function fetchOpenApi(
   const response = await fetchImplementation(ESI_OPENAPI_URL, {
     headers: {
       accept: "application/openapi+json, application/json",
-      "user-agent":
-        "eve-online-mcp-schema-check/0.1.0 (+https://github.com/HammoTime/eve-online-mcp)",
+      "user-agent": SCHEMA_CHECK_USER_AGENT,
     },
   });
   if (!response.ok)
