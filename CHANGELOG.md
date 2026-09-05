@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/HammoTime/eve-online-mcp/compare/v0.1.1...v0.1.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* derive ESI User-Agent from package metadata ([9b555e7](https://github.com/HammoTime/eve-online-mcp/commit/9b555e72cbd0030a0523f82637182d74b11a6b82))
+
 ## [0.1.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.1.0...v0.1.1) (2026-09-05)
 
 
