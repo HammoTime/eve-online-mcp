@@ -1,0 +1,64 @@
+name: Release and publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Create or update release pull request
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+
+  publish:
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require release tag to match package version
+        env:
+          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          package_version="$(node -p 'require("./package.json").version')"
+          expected_tag="v${package_version}"
+          if [ "$RELEASE_VERSION" != "$package_version" ] || [ "$RELEASE_TAG" != "$expected_tag" ]; then
+            echo "Release mismatch: package=$package_version release=$RELEASE_VERSION tag=$RELEASE_TAG expected=$expected_tag" >&2
+            exit 1
+          fi
+      - name: Build development container
+        run: docker build --target development -f .devcontainer/Dockerfile -t eve-online-mcp-dev .
+      - name: Validate and pack inside development container
+        run: >-
+          docker run --rm
+          --user "$(id -u):$(id -g)"
+          -e HOME=/tmp
+          -v "$PWD:/workspace"
+          -w /workspace
+          eve-online-mcp-dev
+          sh -lc "npm ci && npm run validate && npm pack --dry-run"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Publish matching version to npm with provenance
+        run: npm publish --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

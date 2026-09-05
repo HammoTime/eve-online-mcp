@@ -174,9 +174,9 @@ Review any new non-GET operation manually. Read-only `POST` routes are deliberat
 
 ## Publishing to npm
 
-[`publish.yml`](.github/workflows/publish.yml) validates and packs the project inside the devcontainer, then publishes `eve-online-mcp` when a GitHub Release is published. The release tag must exactly match `v` plus the package version, such as `v0.1.0`.
+[`release.yml`](.github/workflows/release.yml) runs on every push to `main`. Release Please maintains a release pull request using Conventional Commit history; that pull request updates `package.json` and `CHANGELOG.md` together. Merging it creates the matching Git tag and GitHub Release, then validates and packs the project inside the devcontainer and publishes that exact version to npm. A guarded assertion compares Release Please's version and tag with `package.json` before publishing.
 
-Publishing uses npm trusted publishing through GitHub OIDC and produces provenance. On npm, configure the trusted publisher as repository `StopHammoTime/eve-online-mcp`, workflow `publish.yml`, with direct publishing allowed. Because `eve-online-mcp` is currently an unclaimed package, the first release may require a granular npm automation token stored as the `NPM_TOKEN` GitHub secret; after that initial publish, configure trusted publishing and remove the secret.
+Publishing uses npm trusted publishing through GitHub OIDC and produces provenance. On npm, configure the trusted publisher as repository `StopHammoTime/eve-online-mcp`, workflow `release.yml`, with direct publishing allowed. Because `eve-online-mcp` is currently an unclaimed package, the first release may require a granular npm automation token stored as the `NPM_TOKEN` GitHub secret; after that initial publish, configure trusted publishing and remove the secret.
 
 ## Test suite
 
