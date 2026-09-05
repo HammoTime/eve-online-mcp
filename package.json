@@ -10,11 +10,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/StopHammoTime/eve-online-mcp.git"
+    "url": "git+https://github.com/HammoTime/eve-online-mcp.git"
   },
-  "homepage": "https://github.com/StopHammoTime/eve-online-mcp#readme",
+  "homepage": "https://github.com/HammoTime/eve-online-mcp#readme",
   "bugs": {
-    "url": "https://github.com/StopHammoTime/eve-online-mcp/issues"
+    "url": "https://github.com/HammoTime/eve-online-mcp/issues"
   },
   "type": "module",
   "bin": {

@@ -375,7 +375,7 @@ export class EsiClient {
       accept: "application/json",
       "user-agent":
         this.options.userAgent ??
-        "eve-online-mcp/0.1.0 (+https://github.com/StopHammoTime/eve-online-mcp)",
+        "eve-online-mcp/0.1.0 (+https://github.com/HammoTime/eve-online-mcp)",
     });
     for (const parameter of parameters.values()) {
       let value = normalizedInput[parameter.name.toLowerCase()];
