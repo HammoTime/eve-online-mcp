@@ -1,0 +1,70 @@
+{
+  "name": "eve-online-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP access to the complete EVE Online ESI OpenAPI surface",
+  "keywords": [
+    "eve-online",
+    "esi",
+    "mcp",
+    "model-context-protocol"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StopHammoTime/eve-online-mcp.git"
+  },
+  "homepage": "https://github.com/StopHammoTime/eve-online-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/StopHammoTime/eve-online-mcp/issues"
+  },
+  "type": "module",
+  "bin": {
+    "eve-online-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "openapi/esi-openapi.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "clean": "node --eval \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
+    "dev": "tsx src/index.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "prepack": "npm run build",
+    "schema:check": "tsx scripts/check-openapi-update.ts",
+    "schema:update": "tsx scripts/update-openapi.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "open": "^10.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}

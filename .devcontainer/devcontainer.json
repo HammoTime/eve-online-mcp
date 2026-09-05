@@ -1,0 +1,20 @@
+{
+  "name": "EVE Online MCP",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+  "remoteUser": "node",
+  "forwardPorts": [52765],
+  "containerEnv": {
+    "ESI_USER_AGENT": "eve-online-mcp/dev (+https://github.com/StopHammoTime/eve-online-mcp)"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  },
+  "postCreateCommand": "npm ci"
+}

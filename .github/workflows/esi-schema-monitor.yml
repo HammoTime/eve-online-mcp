@@ -1,0 +1,47 @@
+name: Monitor ESI OpenAPI schema
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: esi-openapi-schema-monitor
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build development container
+        run: docker build --target development -f .devcontainer/Dockerfile -t eve-online-mcp-dev .
+      - name: Compare pinned schema with ESI
+        id: schema
+        run: >-
+          docker run --rm
+          --user "$(id -u):$(id -g)"
+          -e HOME=/tmp
+          -e GITHUB_OUTPUT=/tmp/github_output
+          -v "$PWD:/workspace"
+          -v "$GITHUB_OUTPUT:/tmp/github_output"
+          -w /workspace
+          eve-online-mcp-dev
+          sh -lc "npm ci && npm run schema:check"
+      - name: Create or update schema issue
+        if: steps.schema.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_BODY: ${{ steps.schema.outputs.body }}
+        run: |
+          title="ESI OpenAPI schema update required"
+          issue_number="$(gh issue list --state open --search \"$title in:title\" --json number --jq '.[0].number // empty')"
+          if [ -z "$issue_number" ]; then
+            gh issue create --title "$title" --body "$ISSUE_BODY"
+          else
+            gh issue comment "$issue_number" --body "$ISSUE_BODY"
+          fi

@@ -1,0 +1,37 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build development container
+        run: docker build --target development -f .devcontainer/Dockerfile -t eve-online-mcp-dev .
+      - name: Validate and build inside development container
+        run: >-
+          docker run --rm
+          --user "$(id -u):$(id -g)"
+          -e HOME=/tmp
+          -v "$PWD:/workspace"
+          -w /workspace
+          eve-online-mcp-dev
+          sh -lc "npm ci && npm run validate && npm pack --dry-run"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Require release tag to match package version
+        run: test "$GITHUB_REF_NAME" = "v$(node -p \"require('./package.json').version\")"
+      - name: Publish to npm with provenance
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
