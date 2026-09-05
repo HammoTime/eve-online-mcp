@@ -1,5 +1,6 @@
 import { missingTokenScopes, type TokenProvider } from "./auth.js";
 import { OperationCatalog } from "./openapi.js";
+import { DEFAULT_ESI_USER_AGENT } from "./package-metadata.js";
 import type {
   JsonValue,
   OperationDescriptor,
@@ -373,9 +374,7 @@ export class EsiClient {
     this.rejectUnknown(normalizedInput, parameters, "header");
     const headers = new Headers({
       accept: "application/json",
-      "user-agent":
-        this.options.userAgent ??
-        "eve-online-mcp/0.1.0 (+https://github.com/HammoTime/eve-online-mcp)",
+      "user-agent": this.options.userAgent ?? DEFAULT_ESI_USER_AGENT,
     });
     for (const parameter of parameters.values()) {
       let value = normalizedInput[parameter.name.toLowerCase()];

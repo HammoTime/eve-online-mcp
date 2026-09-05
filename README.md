@@ -12,7 +12,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `eve-esi://catalog` describes the pinned API coverage and excluded operation count.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action.
 
-ESI cache headers are respected in memory, pagination/rate-limit headers are returned to the model, errors remain structured, responses are limited to 5 MB by default, and a descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/).
+ESI cache headers are respected in memory, pagination/rate-limit headers are returned to the model, errors remain structured, responses are limited to 5 MB by default, and a descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/). It is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
 ## Development container
 
@@ -43,10 +43,7 @@ Once published, configure your MCP host to run the npm package directly:
   "mcpServers": {
     "eve-online": {
       "command": "npx",
-      "args": ["-y", "eve-online-mcp"],
-      "env": {
-        "ESI_USER_AGENT": "YourApp/1.0 (you@example.com; +https://github.com/you/your-repo)"
-      }
+      "args": ["-y", "eve-online-mcp"]
     }
   }
 }
@@ -142,7 +139,7 @@ Optional settings:
 
 | Variable                 | Purpose                                                   |
 | ------------------------ | --------------------------------------------------------- |
-| `ESI_USER_AGENT`         | Identifies your app and provides contact details to CCP   |
+| `ESI_USER_AGENT`         | Optional override for a downstream app's identity/contact |
 | `ESI_MAX_RESPONSE_BYTES` | Overrides the 5,000,000-byte response ceiling             |
 | `ESI_OPENAPI_PATH`       | Loads a different local OpenAPI document for development  |
 | `EVE_CREDENTIALS_PATH`   | Overrides the OS credential file location                 |
