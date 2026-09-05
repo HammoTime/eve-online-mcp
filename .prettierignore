@@ -3,4 +3,4 @@ dist/
 node_modules/
 openapi/esi-openapi.json
 package-lock.json
-
+CHANGELOG.md
