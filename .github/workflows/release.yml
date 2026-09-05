@@ -11,6 +11,10 @@ permissions:
   pull-requests: write
   id-token: write
 
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -24,18 +28,94 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           release-type: node
+          target-branch: main
 
-  publish:
+  publish-plan:
     needs: release
-    if: needs.release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.plan.outputs.should_publish }}
+      tag_name: ${{ steps.plan.outputs.tag_name }}
+      version: ${{ steps.plan.outputs.version }}
     steps:
       - uses: actions/checkout@v6
-      - name: Require release tag to match package version
+        with:
+          fetch-depth: 0
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Select an unpublished GitHub release
+        id: plan
         env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CREATED: ${{ needs.release.outputs.release_created }}
           RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
           RELEASE_VERSION: ${{ needs.release.outputs.version }}
+        shell: bash
         run: |
+          set -euo pipefail
+
+          package_name="$(node -p 'require("./package.json").name')"
+          package_version="$(node -p 'require("./package.json").version')"
+
+          if [ "$RELEASE_CREATED" = "true" ]; then
+            version="$RELEASE_VERSION"
+            tag_name="$RELEASE_TAG"
+          else
+            # Bootstrap a GitHub release that predates this publishing workflow.
+            version="$package_version"
+            tag_name="v${version}"
+          fi
+
+          expected_tag="v${version}"
+          if [ "$tag_name" != "$expected_tag" ]; then
+            echo "Release tag $tag_name does not match version $version." >&2
+            exit 1
+          fi
+
+          if ! git show-ref --verify --quiet "refs/tags/${tag_name}"; then
+            echo "No ${tag_name} tag is available; nothing to publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! gh release view "$tag_name" --repo "$GITHUB_REPOSITORY" >/dev/null; then
+            echo "Tag ${tag_name} is not a GitHub Release; nothing to publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          published_version="$(npm view "${package_name}@${version}" version 2>/dev/null || true)"
+          if [ "$published_version" = "$version" ]; then
+            echo "${package_name}@${version} is already published."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Publishing ${package_name}@${version} from ${tag_name}."
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [release, publish-plan]
+    if: needs.publish-plan.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.publish-plan.outputs.tag_name }}
+      - name: Require release tag to match package version
+        env:
+          RELEASE_TAG: ${{ needs.publish-plan.outputs.tag_name }}
+          RELEASE_VERSION: ${{ needs.publish-plan.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
           package_version="$(node -p 'require("./package.json").version')"
           expected_tag="v${package_version}"
           if [ "$RELEASE_VERSION" != "$package_version" ] || [ "$RELEASE_TAG" != "$expected_tag" ]; then
@@ -58,7 +138,11 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
-      - name: Publish matching version to npm with provenance
-        run: npm publish --ignore-scripts
+      - name: Publish first package version with bootstrap token
+        if: env.NPM_TOKEN != ''
+        run: npm publish --ignore-scripts --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+      - name: Publish matching version through trusted publishing
+        if: env.NPM_TOKEN == ''
+        run: npm publish --ignore-scripts --provenance

@@ -174,9 +174,9 @@ Review any new non-GET operation manually. Read-only `POST` routes are deliberat
 
 ## Publishing to npm
 
-[`release.yml`](.github/workflows/release.yml) runs on every push to `main`. Release Please maintains a release pull request using Conventional Commit history; that pull request updates `package.json` and `CHANGELOG.md` together. Merging it creates the matching Git tag and GitHub Release, then validates and packs the project inside the devcontainer and publishes that exact version to npm. A guarded assertion compares Release Please's version and tag with `package.json` before publishing.
+[`release.yml`](.github/workflows/release.yml) runs on every push to `main`. Release Please maintains a release pull request using Conventional Commit history; use subjects such as `fix: repair release workflow` or `feat: add route planning`. That pull request updates `package.json` and `CHANGELOG.md` together. Merging it creates the matching Git tag and GitHub Release, then validates and packs the project inside the devcontainer and publishes that exact version to npm. A guarded assertion compares the release version, Git tag, and the tagged `package.json` before publishing. The workflow also bootstraps an existing matching GitHub Release when its package version is still absent from npm.
 
-Publishing uses npm trusted publishing through GitHub OIDC and produces provenance. On npm, configure the trusted publisher as repository `StopHammoTime/eve-online-mcp`, workflow `release.yml`, with direct publishing allowed. Because `eve-online-mcp` is currently an unclaimed package, the first release may require a granular npm automation token stored as the `NPM_TOKEN` GitHub secret; after that initial publish, configure trusted publishing and remove the secret.
+Publishing uses npm trusted publishing through GitHub OIDC and produces provenance. On npm, configure the trusted publisher as repository `HammoTime/eve-online-mcp`, workflow `release.yml`, with direct publishing allowed. Because an unclaimed package cannot have trusted publishing configured yet, its first release requires a granular npm automation token stored as the `NPM_TOKEN` GitHub secret. After that initial publish, configure trusted publishing and remove the secret.
 
 ## Test suite
 

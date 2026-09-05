@@ -84,7 +84,7 @@ export async function fetchOpenApi(
     headers: {
       accept: "application/openapi+json, application/json",
       "user-agent":
-        "eve-online-mcp-schema-check/0.1.0 (+https://github.com/StopHammoTime/eve-online-mcp)",
+        "eve-online-mcp-schema-check/0.1.0 (+https://github.com/HammoTime/eve-online-mcp)",
     },
   });
   if (!response.ok)
