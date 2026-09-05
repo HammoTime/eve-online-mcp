@@ -140,7 +140,7 @@ jobs:
           package-manager-cache: false
       - name: Publish first package version with bootstrap token
         if: env.NPM_TOKEN != ''
-        run: npm publish --ignore-scripts --provenance
+        run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
       - name: Publish matching version through trusted publishing
