@@ -1,6 +1,6 @@
 {
   "name": "eve-online-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read-only MCP access to the complete EVE Online ESI OpenAPI surface",
   "keywords": [
     "eve-online",
