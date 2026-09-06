@@ -4,6 +4,10 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "fix"
+      prefix-development: "fix"
+      include: "scope"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -35,6 +39,9 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "fix"
+      include: "scope"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -44,6 +51,9 @@ updates:
   - package-ecosystem: "docker"
     directory: "/.devcontainer"
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "fix"
+      include: "scope"
     schedule:
       interval: "weekly"
       day: "monday"
