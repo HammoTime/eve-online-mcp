@@ -7,7 +7,15 @@ describe("OperationCatalog", () => {
     const catalog = new OperationCatalog(fixtureDocument());
     expect(
       catalog.operations.map((operation) => operation.operationId),
-    ).toEqual(["GetCharacterAssets", "GetStatus", "PostUniverseNames"]);
+    ).toEqual([
+      "GetCharacterAssets",
+      "GetCharactersCharacterId",
+      "GetCharactersCharacterIdLocation",
+      "GetMarketsRegionIdOrders",
+      "GetStatus",
+      "PostUniverseIds",
+      "PostUniverseNames",
+    ]);
     expect(catalog.excludedMutatingOperationCount).toBe(1);
     expect(() => catalog.get("MoveCharacterAssets")).toThrow(/non-read-only/u);
   });
@@ -22,7 +30,14 @@ describe("OperationCatalog", () => {
     expect(
       catalog.search({ tag: "status", authenticated: false, limit: 500 }),
     ).toHaveLength(1);
-    expect(catalog.tags).toEqual(["Assets", "Status", "Universe"]);
+    expect(catalog.tags).toEqual([
+      "Assets",
+      "Character",
+      "Location",
+      "Market",
+      "Status",
+      "Universe",
+    ]);
   });
 
   it("resolves JSON pointers and detects invalid references", () => {
