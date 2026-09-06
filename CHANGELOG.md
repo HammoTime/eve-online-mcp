@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.2.1...v0.3.0) (2026-09-06)
+
+
+### Features
+
+* add activity-guided adventure playbooks ([#28](https://github.com/HammoTime/eve-online-mcp/issues/28)) ([9b788db](https://github.com/HammoTime/eve-online-mcp/commit/9b788dbca19616042e22f94304657cec95659c78))
+
 ## [0.2.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.2.0...v0.2.1) (2026-09-06)
 
 
