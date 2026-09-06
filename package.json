@@ -51,7 +51,7 @@
   "license": "AGPL-3.0-only",
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
-    "open": "^10.0.0",
+    "open": "^11.0.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
