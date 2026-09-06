@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.2.0...v0.2.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** accept Release Please pull request titles ([#24](https://github.com/HammoTime/eve-online-mcp/issues/24)) ([169ae45](https://github.com/HammoTime/eve-online-mcp/commit/169ae457873cd6a724fe942e12f6a105167af3cb))
+* **deps:** automate dependency patch releases ([#22](https://github.com/HammoTime/eve-online-mcp/issues/22)) ([d30bb4f](https://github.com/HammoTime/eve-online-mcp/commit/d30bb4fd3488d64be8c75ba0b07ed69016ee69e4))
+
 ## [0.2.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.1.2...v0.2.0) (2026-09-06)
 
 
