@@ -76,6 +76,45 @@ export function resolveReference<T>(
   return current as T;
 }
 
+function resolveSchemaValue(
+  document: OpenApiDocument,
+  value: unknown,
+  activeReferences: Set<string>,
+  depth: number,
+): unknown {
+  if (depth > 24) throw new Error("OpenAPI schema reference depth exceeded");
+  if (Array.isArray(value))
+    return value.map((item) =>
+      resolveSchemaValue(document, item, activeReferences, depth + 1),
+    );
+  if (typeof value !== "object" || value === null) return value;
+  if (isReference(value)) {
+    if (activeReferences.has(value.$ref)) {
+      return { $ref: value.$ref, circular: true };
+    }
+    const nextReferences = new Set(activeReferences).add(value.$ref);
+    return resolveSchemaValue(
+      document,
+      resolveReference(document, value),
+      nextReferences,
+      depth + 1,
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      resolveSchemaValue(document, item, activeReferences, depth + 1),
+    ]),
+  );
+}
+
+export class UnknownOperationError extends Error {
+  constructor(readonly operationId: string) {
+    super(`Unknown or non-read-only ESI operation: ${operationId}`);
+    this.name = "UnknownOperationError";
+  }
+}
+
 function scopesFor(
   document: OpenApiDocument,
   operation: OperationObject,
@@ -196,7 +235,7 @@ export class OperationCatalog {
   get(operationId: string): OperationDescriptor {
     const operation = this.byId.get(operationId);
     if (!operation) {
-      throw new Error(`Unknown or non-read-only ESI operation: ${operationId}`);
+      throw new UnknownOperationError(operationId);
     }
     return operation;
   }
@@ -263,6 +302,15 @@ export class OperationCatalog {
     return parameter.schema
       ? resolveReference<SchemaObject>(this.document, parameter.schema)
       : {};
+  }
+
+  resolvedSchema(schema: SchemaObject | ReferenceObject): SchemaObject {
+    return resolveSchemaValue(
+      this.document,
+      schema,
+      new Set(),
+      0,
+    ) as SchemaObject;
   }
 }
 

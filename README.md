@@ -6,13 +6,16 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 
 ## What the MCP server exposes
 
-- `search_esi_operations` finds endpoints using ordinary keywords, ESI tags, and authentication requirements.
-- `get_esi_operation` returns exact parameters, request-body schema, OAuth scopes, cache hints, and rate-limit metadata.
-- `call_esi` invokes only catalogued read operations. It rejects undeclared parameters, validates values, fixes the origin to ESI, supplies compatibility headers, and never accepts an Authorization header from a tool call.
-- `eve-esi://catalog` describes the pinned API coverage and excluded operation count.
+- `search_esi_operations` ranks endpoints using deterministic lexical and curated intent matching, supports hard tag/authentication filters and offsets, and explains every match.
+- `get_esi_operation` returns exact parameters, request-body schema, required caller inputs, defaults, pagination guidance, OAuth scopes, cache hints, safe examples where available, and rate-limit metadata.
+- `call_esi` invokes one page of one catalogued read operation. It rejects undeclared parameters, validates values, fixes the origin to ESI, supplies compatibility headers, and never accepts an Authorization header from a tool call.
+- `resolve_eve_entities` performs one exact-only public batch lookup from names to every matching ID/category, or from IDs to names/categories. Ambiguous and unresolved values remain explicit.
+- `get_character_context` retrieves only the requested `profile`, `location`, `ship`, `skills`, `skillQueue`, and/or `wallet` sections for an explicit character ID, with per-section data, freshness, and errors.
+- `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
+- `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action.
 
-ESI cache headers are respected in memory, pagination/rate-limit headers are returned to the model, errors remain structured, responses are limited to 5 MB by default, and a descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/). It is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
+ESI cache headers are respected in memory, protected cache entries are isolated by credential context, and every response reports fetch/serve/expiry timestamps plus defensive page metadata. Errors include stable codes, retryability, Retry-After guidance, and a suggested action. Individual responses and bounded composite workflows use 5 MB safety ceilings. A descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/); it is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
 ## Development container
 
@@ -154,7 +157,11 @@ Select the `plan_eve_adventure` prompt in your MCP host, or ask something like:
 
 > Using my current location, skills, wallet, assets, and the nearby market, give me three two-hour exploration plans. Explain risk and startup cost, then recommend the best first step.
 
-The model can discover the relevant endpoints instead of relying on memorized route names. Large paginated datasets should be requested one page at a time using the returned `x-pages` header.
+The model can resolve exact names/IDs, request explicit character sections, and use the bounded public market workflow without relying on memorized route names. Generic questions still use search, inspect, and call. `call_esi` always remains one page; when its validated page count is available, another page can be requested with the returned `pagination.nextCall`.
+
+Character context is not an atomic snapshot: each requested section reports its own source and freshness, and successful public profile retrieval can coexist with a protected-section authentication failure. Skill and skill-queue results retain ESI's warning that completed queue entries may not appear in the skills endpoint until the next character login.
+
+Market snapshots cover the public regional orders endpoint only. `locationId` is an exact local filter over those regional rows, not access to private structure markets. Completeness means all reported pages were accepted within the selected page/byte bounds without detected inconsistency; it does not mean prices are real-time, universally accessible, or executable. Buy-order range and minimum volume still apply, and an observed spread is not guaranteed profit.
 
 ## Schema monitoring
 
