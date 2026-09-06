@@ -38,7 +38,7 @@ jobs:
       tag_name: ${{ steps.plan.outputs.tag_name }}
       version: ${{ steps.plan.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: main
@@ -106,7 +106,7 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.publish-plan.outputs.tag_name }}
       - name: Require release tag to match package version
