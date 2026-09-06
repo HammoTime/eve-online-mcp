@@ -41,8 +41,13 @@ jobs:
   publish-plan:
     needs: release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
       should_publish: ${{ steps.plan.outputs.should_publish }}
+      publish_npmjs: ${{ steps.plan.outputs.publish_npmjs }}
+      publish_github_packages: ${{ steps.plan.outputs.publish_github_packages }}
       tag_name: ${{ steps.plan.outputs.tag_name }}
       version: ${{ steps.plan.outputs.version }}
     steps:
@@ -53,11 +58,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@hammotime"
           package-manager-cache: false
-      - name: Select an unpublished GitHub release
+      - name: Select missing registry copies for a GitHub release
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
           RELEASE_CREATED: ${{ needs.release.outputs.release_created }}
           RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
           RELEASE_VERSION: ${{ needs.release.outputs.version }}
@@ -66,6 +74,7 @@ jobs:
           set -euo pipefail
 
           package_name="$(node -p 'require("./package.json").name')"
+          github_package="@hammotime/${package_name##*/}"
           package_version="$(node -p 'require("./package.json").version')"
 
           if [ "$RELEASE_CREATED" = "true" ]; then
@@ -95,15 +104,31 @@ jobs:
             exit 0
           fi
 
-          published_version="$(npm view "${package_name}@${version}" version 2>/dev/null || true)"
-          if [ "$published_version" = "$version" ]; then
-            echo "${package_name}@${version} is already published."
+          npmjs_version="$(npm view "${package_name}@${version}" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
+          github_version="$(npm view "${github_package}@${version}" version --registry=https://npm.pkg.github.com 2>/dev/null || true)"
+
+          publish_npmjs=true
+          if [ "$npmjs_version" = "$version" ]; then
+            echo "${package_name}@${version} is already published to npmjs."
+            publish_npmjs=false
+          fi
+
+          publish_github_packages=true
+          if [ "$github_version" = "$version" ]; then
+            echo "${github_package}@${version} is already published to GitHub Packages."
+            publish_github_packages=false
+          fi
+
+          if [ "$publish_npmjs" = "false" ] && [ "$publish_github_packages" = "false" ]; then
+            echo "All registries already contain version ${version}."
             echo "should_publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "Publishing ${package_name}@${version} from ${tag_name}."
+          echo "Publishing missing registry copies for ${tag_name}."
           echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          echo "publish_npmjs=${publish_npmjs}" >> "$GITHUB_OUTPUT"
+          echo "publish_github_packages=${publish_github_packages}" >> "$GITHUB_OUTPUT"
           echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
@@ -112,6 +137,10 @@ jobs:
     if: needs.publish-plan.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     environment: npmjs.com
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
@@ -143,15 +172,31 @@ jobs:
           eve-online-mcp-dev
           sh -lc "npm ci && npm run validate && npm pack --dry-run"
       - uses: actions/setup-node@v7
+        if: needs.publish-plan.outputs.publish_npmjs == 'true'
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - name: Publish first package version with bootstrap token
-        if: env.NPM_TOKEN != ''
+        if: needs.publish-plan.outputs.publish_npmjs == 'true' && env.NPM_TOKEN != ''
         run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
       - name: Publish matching version through trusted publishing
-        if: env.NPM_TOKEN == ''
+        if: needs.publish-plan.outputs.publish_npmjs == 'true' && env.NPM_TOKEN == ''
         run: npm publish --ignore-scripts --provenance
+      - uses: actions/setup-node@v7
+        if: needs.publish-plan.outputs.publish_github_packages == 'true'
+        with:
+          node-version: "24"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@hammotime"
+          package-manager-cache: false
+      - name: Prepare the GitHub Packages scope
+        if: needs.publish-plan.outputs.publish_github_packages == 'true'
+        run: npm pkg set name="@hammotime/eve-online-mcp"
+      - name: Publish matching version to GitHub Packages
+        if: needs.publish-plan.outputs.publish_github_packages == 'true'
+        run: npm publish --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
