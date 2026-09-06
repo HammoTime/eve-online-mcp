@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.1...v0.3.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** target repository when dispatching releases ([#32](https://github.com/HammoTime/eve-online-mcp/issues/32)) ([7c9054e](https://github.com/HammoTime/eve-online-mcp/commit/7c9054ea791a5ce8dd033cdf180f26d76822727a))
+
 ## [0.3.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.0...v0.3.1) (2026-09-06)
 
 
