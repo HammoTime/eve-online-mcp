@@ -132,17 +132,12 @@ jobs:
           echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-  publish:
+  package:
     needs: [release, publish-plan]
     if: needs.publish-plan.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
-    environment: npmjs.com
     permissions:
       contents: read
-      id-token: write
-      packages: write
-    env:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -166,37 +161,87 @@ jobs:
         run: >-
           docker run --rm
           --user "$(id -u):$(id -g)"
-          -e HOME=/tmp
+          -e NPM_CONFIG_CACHE=/tmp/npm-cache
           -v "$PWD:/workspace"
           -w /workspace
           eve-online-mcp-dev
-          sh -lc "npm ci && npm run validate && npm pack --dry-run"
+          sh -lc "npm ci && npm run validate && npm pack --dry-run && npm pack --ignore-scripts"
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: "*.tgz"
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-npmjs:
+    needs: [publish-plan, package]
+    if: needs.publish-plan.outputs.publish_npmjs == 'true'
+    runs-on: ubuntu-latest
+    environment: npmjs.com
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: package-artifact
       - uses: actions/setup-node@v7
-        if: needs.publish-plan.outputs.publish_npmjs == 'true'
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - name: Publish first package version with bootstrap token
-        if: needs.publish-plan.outputs.publish_npmjs == 'true' && env.NPM_TOKEN != ''
-        run: npm publish --ignore-scripts
+        if: env.NPM_TOKEN != ''
+        run: npm publish package-artifact/*.tgz --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
       - name: Publish matching version through trusted publishing
-        if: needs.publish-plan.outputs.publish_npmjs == 'true' && env.NPM_TOKEN == ''
-        run: npm publish --ignore-scripts --provenance
+        if: env.NPM_TOKEN == ''
+        run: npm publish package-artifact/*.tgz --ignore-scripts --provenance
+
+  publish-github-packages:
+    needs: [publish-plan, package]
+    if: needs.publish-plan.outputs.publish_github_packages == 'true'
+    runs-on: ubuntu-latest
+    environment: github.com
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+          path: package-artifact
       - uses: actions/setup-node@v7
-        if: needs.publish-plan.outputs.publish_github_packages == 'true'
         with:
           node-version: "24"
           registry-url: "https://npm.pkg.github.com"
           scope: "@hammotime"
           package-manager-cache: false
       - name: Prepare the GitHub Packages scope
-        if: needs.publish-plan.outputs.publish_github_packages == 'true'
-        run: npm pkg set name="@hammotime/eve-online-mcp"
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=(package-artifact/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "Expected exactly one package tarball, found ${#tarballs[@]}." >&2
+            exit 1
+          fi
+          mkdir github-package
+          tar -xzf "${tarballs[0]}" -C github-package
+          cd github-package/package
+          npm pkg set name="@hammotime/eve-online-mcp"
       - name: Publish matching version to GitHub Packages
-        if: needs.publish-plan.outputs.publish_github_packages == 'true'
         run: npm publish --ignore-scripts
+        working-directory: github-package/package
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
