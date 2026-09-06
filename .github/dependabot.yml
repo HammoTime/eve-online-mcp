@@ -9,6 +9,10 @@ updates:
       time: "09:00"
       timezone: "Australia/Sydney"
     groups:
+      vitest:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
       npm-non-major:
         patterns:
           - "*"

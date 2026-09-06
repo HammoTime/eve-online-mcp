@@ -1,0 +1,55 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pull-request-number:
+        description: "Existing Dependabot pull request number"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  approve-and-schedule:
+    if: >-
+      github.repository == 'HammoTime/eve-online-mcp' &&
+      (github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.user.login == 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Dependabot pull request
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST_NUMBER: >-
+            ${{ github.event_name == 'workflow_dispatch' &&
+            inputs.pull-request-number || github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          author="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER}" --jq '.user.login')"
+          if [ "$author" != "dependabot[bot]" ]; then
+            echo "Pull request #${PULL_REQUEST_NUMBER} was opened by ${author}, not Dependabot." >&2
+            exit 1
+          fi
+
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_REQUEST_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Approve pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST_URL: ${{ steps.pull-request.outputs.url }}
+        run: gh pr review "$PULL_REQUEST_URL" --approve --body "Approved for automatic merge after required checks pass."
+
+      - name: Schedule squash merge after CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST_URL: ${{ steps.pull-request.outputs.url }}
+        run: gh pr comment "$PULL_REQUEST_URL" --body "@dependabot squash and merge"
