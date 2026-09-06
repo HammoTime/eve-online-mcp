@@ -13,7 +13,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `get_character_context` retrieves only the requested `profile`, `location`, `ship`, `skills`, `skillQueue`, and/or `wallet` sections for an explicit character ID, with per-section data, freshness, and errors.
 - `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
-- `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action.
+- `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
 
 ESI cache headers are respected in memory, protected cache entries are isolated by credential context, and every response reports fetch/serve/expiry timestamps plus defensive page metadata. Errors include stable codes, retryability, Retry-After guidance, and a suggested action. Individual responses and bounded composite workflows use 5 MB safety ceilings. A descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/); it is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
@@ -156,6 +156,10 @@ Do not commit tokens or client secrets. Tool responses never include the token, 
 Select the `plan_eve_adventure` prompt in your MCP host, or ask something like:
 
 > Using my current location, skills, wallet, assets, and the nearby market, give me three two-hour exploration plans. Explain risk and startup cost, then recommend the best first step.
+
+The prompt accepts a required free-form `goal`, plus optional `activity`, `characterId`, and `constraints` arguments. Supported activity values are `exploration`, `factional_warfare`, `mining`, `industry`, `trading`, `hauling`, `missions`, `pve`, and `pvp`. Omitting `activity` retains the general planning workflow.
+
+Each activity selects a focused evidence and advice playbook. For example, mining planning can locate owned mining-capable ships, compare the work needed to retrieve them, examine recent mining and skills, compare routes to accessible public markets, and recommend a resource only when price, demand, logistics, and capability support it. Factional-warfare planning checks enrollment, skills, owned ships, budget, war-zone and route evidence, then provides enrollment, staging, ship, and in-game FW-map guidance. Loyalty-point recommendations require current in-game offer details because ESI does not expose the LP Store catalogue.
 
 The model can resolve exact names/IDs, request explicit character sections, and use the bounded public market workflow without relying on memorized route names. Generic questions still use search, inspect, and call. `call_esi` always remains one page; when its validated page count is available, another page can be requested with the returned `pagination.nextCall`.
 

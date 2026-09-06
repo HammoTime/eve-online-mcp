@@ -170,6 +170,54 @@ describe("EVE MCP server", () => {
     expect(JSON.stringify(prompt.messages[0]?.content)).toContain(
       "get_character_context",
     );
+    expect(JSON.stringify(prompt.messages[0]?.content)).toContain(
+      "No activity playbook was selected",
+    );
+
+    const miningPrompt = await client.getPrompt({
+      name: "plan_eve_adventure",
+      arguments: {
+        goal: "Use a ship I already own and find something valuable to mine",
+        activity: "mining",
+        characterId: "123",
+      },
+    });
+    const miningContent = JSON.stringify(miningPrompt.messages[0]?.content);
+    expect(miningContent).toContain("Activity playbook: Mining");
+    expect(miningContent).toContain("GetCharactersCharacterIdAssets");
+    expect(miningContent).toContain("rather than assuming Jita is nearest");
+
+    const factionalWarfarePrompt = await client.getPrompt({
+      name: "plan_eve_adventure",
+      arguments: {
+        goal: "Help me enlist, stage a cheap ship, and earn useful LP",
+        activity: "factional_warfare",
+        characterId: "123",
+      },
+    });
+    const factionalWarfareContent = JSON.stringify(
+      factionalWarfarePrompt.messages[0]?.content,
+    );
+    expect(factionalWarfareContent).toContain(
+      "Activity playbook: Factional warfare",
+    );
+    expect(factionalWarfareContent).toContain(
+      "current in-game Factional Warfare interface",
+    );
+    expect(factionalWarfareContent).toContain(
+      "Frontline, Command Operations, or Rearguard",
+    );
+    expect(factionalWarfareContent).toContain("estimate net ISK per LP");
+  });
+
+  it("rejects an unknown adventure activity", async () => {
+    const client = await connectedClient();
+    await expect(
+      client.getPrompt({
+        name: "plan_eve_adventure",
+        arguments: { goal: "Try something", activity: "piracy" },
+      }),
+    ).rejects.toThrow();
   });
 
   it("rejects invalid strict workflow inputs through MCP", async () => {
