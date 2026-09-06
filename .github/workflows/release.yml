@@ -42,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           package-manager-cache: false
@@ -133,7 +133,7 @@ jobs:
           -w /workspace
           eve-online-mcp-dev
           sh -lc "npm ci && npm run validate && npm pack --dry-run"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
