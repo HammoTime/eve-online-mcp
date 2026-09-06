@@ -1,4 +1,4 @@
-name: Dependabot auto-merge
+name: Release PR auto-merge
 
 on:
   pull_request_target:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       pull-request-number:
-        description: "Existing Dependabot pull request number"
+        description: "Existing Release Please pull request number"
         required: true
         type: number
 
@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: >-
-    dependabot-auto-merge-${{ github.event_name == 'workflow_dispatch' &&
+    release-pr-auto-merge-${{ github.event_name == 'workflow_dispatch' &&
     inputs.pull-request-number || github.event.pull_request.number }}
   cancel-in-progress: true
 
@@ -26,10 +26,10 @@ jobs:
     if: >-
       github.repository == 'HammoTime/eve-online-mcp' &&
       (github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.user.login == 'dependabot[bot]')
+      github.event.pull_request.user.login == 'tagreleaserestrictor[bot]')
     runs-on: ubuntu-latest
     steps:
-      - name: Verify Dependabot pull request
+      - name: Verify Release Please pull request
         id: pull-request
         env:
           GH_TOKEN: ${{ github.token }}
@@ -40,20 +40,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          author="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER}" --jq '.user.login')"
-          if [ "$author" != "dependabot[bot]" ]; then
-            echo "Pull request #${PULL_REQUEST_NUMBER} was opened by ${author}, not Dependabot." >&2
-            exit 1
-          fi
+          pull_request="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER}")"
+          author="$(jq -r '.user.login' <<< "$pull_request")"
+          head_ref="$(jq -r '.head.ref' <<< "$pull_request")"
+          head_sha="$(jq -r '.head.sha' <<< "$pull_request")"
+          base_ref="$(jq -r '.base.ref' <<< "$pull_request")"
+          state="$(jq -r '.state' <<< "$pull_request")"
+          title="$(jq -r '.title' <<< "$pull_request")"
+
+          test "$author" = "tagreleaserestrictor[bot]"
+          test "$head_ref" = "release-please--branches--main--components--eve-online-mcp"
+          test "$base_ref" = "main"
+          test "$state" = "open"
+          [[ "$title" =~ ^chore\(main\):\ release\ eve-online-mcp\ [0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+          files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER}/files" --jq '.[].filename' | sort)"
+          expected_files=$'CHANGELOG.md\npackage-lock.json\npackage.json'
+          test "$files" = "$expected_files"
+
+          version="${title##* }"
+          package_version="$(gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=${head_sha}" --jq '.content' | base64 --decode | jq -r '.version')"
+          lock_version="$(gh api "repos/${GITHUB_REPOSITORY}/contents/package-lock.json?ref=${head_sha}" --jq '.content' | base64 --decode | jq -r '.version')"
+          changelog="$(gh api "repos/${GITHUB_REPOSITORY}/contents/CHANGELOG.md?ref=${head_sha}" --jq '.content' | base64 --decode)"
+
+          test "$package_version" = "$version"
+          test "$lock_version" = "$version"
+          grep -Fq "## [${version}]" <<< "$changelog"
 
           echo "number=${PULL_REQUEST_NUMBER}" >> "$GITHUB_OUTPUT"
           echo "url=https://github.com/${GITHUB_REPOSITORY}/pull/${PULL_REQUEST_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      - name: Approve pull request
+      - name: Approve release pull request
         env:
           GH_TOKEN: ${{ github.token }}
           PULL_REQUEST_URL: ${{ steps.pull-request.outputs.url }}
-        run: gh pr review "$PULL_REQUEST_URL" --approve --body "Approved for automatic merge after required checks pass."
+        run: gh pr review "$PULL_REQUEST_URL" --approve --body "Verified Release Please output; approved for automatic merge after required checks pass."
 
       - name: Enable squash auto-merge
         env:
