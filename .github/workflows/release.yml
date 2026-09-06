@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -23,10 +21,20 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      - name: Create release app token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-issues: write
+          permission-pull-requests: write
       - name: Create or update release pull request
         id: release
         uses: googleapis/release-please-action@v5
         with:
+          token: ${{ steps.release-token.outputs.token }}
           release-type: node
           target-branch: main
 
