@@ -95,7 +95,7 @@ jobs:
           for attempt in {1..120}; do
             state="$(gh pr view "$PULL_REQUEST_URL" --json state --jq '.state')"
             if [ "$state" = "MERGED" ]; then
-              gh workflow run release.yml --ref main
+              gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main
               exit 0
             fi
             if [ "$state" = "CLOSED" ]; then
