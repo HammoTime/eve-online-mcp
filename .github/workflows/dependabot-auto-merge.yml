@@ -11,8 +11,7 @@ on:
         type: number
 
 permissions:
-  contents: read
-  issues: write
+  contents: write
   pull-requests: write
 
 jobs:
@@ -48,8 +47,8 @@ jobs:
           PULL_REQUEST_URL: ${{ steps.pull-request.outputs.url }}
         run: gh pr review "$PULL_REQUEST_URL" --approve --body "Approved for automatic merge after required checks pass."
 
-      - name: Schedule squash merge after CI
+      - name: Enable squash auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
           PULL_REQUEST_URL: ${{ steps.pull-request.outputs.url }}
-        run: gh pr comment "$PULL_REQUEST_URL" --body "@dependabot squash and merge"
+        run: gh pr merge "$PULL_REQUEST_URL" --auto --squash
