@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { TokenProvider } from "../src/auth.js";
 import { getCharacterContext } from "../src/character-context.js";
 import { EsiClient } from "../src/esi-client.js";
 import { loadOpenApiDocument, OperationCatalog } from "../src/openapi.js";
@@ -14,7 +15,7 @@ function jwt(scopes: string[]): string {
 }
 
 function clientWith(
-  provider: { getAccessToken: ReturnType<typeof vi.fn> },
+  provider: TokenProvider,
   fetchImplementation: typeof fetch,
 ) {
   return new EsiClient(catalog, provider, {
@@ -25,7 +26,9 @@ function clientWith(
 
 describe("character context", () => {
   it("fetches only selected public sections without authentication", async () => {
-    const provider = { getAccessToken: vi.fn() };
+    const provider = {
+      getAccessToken: vi.fn<TokenProvider["getAccessToken"]>(),
+    };
     const fetchImplementation = vi
       .fn<typeof fetch>()
       .mockResolvedValue(new Response('{"name":"Pilot"}'));
@@ -150,7 +153,9 @@ describe("character context", () => {
 
     const bounded = await getCharacterContext(
       clientWith(
-        { getAccessToken: vi.fn() },
+        {
+          getAccessToken: vi.fn<TokenProvider["getAccessToken"]>(),
+        },
         vi
           .fn<typeof fetch>()
           .mockResolvedValue(

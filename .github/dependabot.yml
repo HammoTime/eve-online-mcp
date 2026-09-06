@@ -19,6 +19,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # typescript-eslint 8 currently supports TypeScript versions below 6.1.
+      - dependency-name: "typescript"
+        versions:
+          - "7.x"
 
   - package-ecosystem: "github-actions"
     directory: "/"
