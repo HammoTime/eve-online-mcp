@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.1.2...v0.2.0) (2026-09-06)
+
+
+### Features
+
+* uplift ESI discovery and workflows ([65907c2](https://github.com/HammoTime/eve-online-mcp/commit/65907c29421e70b46f7b6cd37020091b8df11aa6))
+
 ## [0.1.2](https://github.com/HammoTime/eve-online-mcp/compare/v0.1.1...v0.1.2) (2026-09-05)
 
 
