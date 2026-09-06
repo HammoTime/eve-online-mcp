@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.0...v0.3.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** publish npm tarball from local path ([#30](https://github.com/HammoTime/eve-online-mcp/issues/30)) ([307cf26](https://github.com/HammoTime/eve-online-mcp/commit/307cf26af631ec533692d7d9acc8e56a9d637087))
+
 ## [0.3.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.2.1...v0.3.0) (2026-09-06)
 
 
