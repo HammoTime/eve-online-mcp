@@ -111,6 +111,7 @@ jobs:
     needs: [release, publish-plan]
     if: needs.publish-plan.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
+    environment: npmjs.com
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
