@@ -52,7 +52,7 @@ jobs:
           test "$head_ref" = "release-please--branches--main--components--eve-online-mcp"
           test "$base_ref" = "main"
           test "$state" = "open"
-          [[ "$title" =~ ^chore\(main\):\ release\ eve-online-mcp\ [0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$title" =~ ^chore\(main\):\ release\ [0-9]+\.[0-9]+\.[0-9]+$ ]]
 
           files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PULL_REQUEST_NUMBER}/files" --jq '.[].filename' | sort)"
           expected_files=$'CHANGELOG.md\npackage-lock.json\npackage.json'
