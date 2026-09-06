@@ -198,12 +198,30 @@ jobs:
           package-manager-cache: false
       - name: Publish first package version with bootstrap token
         if: env.NPM_TOKEN != ''
-        run: npm publish package-artifact/*.tgz --ignore-scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=(package-artifact/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "Expected exactly one package tarball, found ${#tarballs[@]}." >&2
+            exit 1
+          fi
+          npm publish "./${tarballs[0]}" --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
       - name: Publish matching version through trusted publishing
         if: env.NPM_TOKEN == ''
-        run: npm publish package-artifact/*.tgz --ignore-scripts --provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tarballs=(package-artifact/*.tgz)
+          if [ "${#tarballs[@]}" -ne 1 ]; then
+            echo "Expected exactly one package tarball, found ${#tarballs[@]}." >&2
+            exit 1
+          fi
+          npm publish "./${tarballs[0]}" --ignore-scripts --provenance
 
   publish-github-packages:
     needs: [publish-plan, package]
