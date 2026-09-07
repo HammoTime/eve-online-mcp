@@ -14,8 +14,13 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `resolve_eve_entities` performs one exact-only public batch lookup from names to every matching ID/category, or from IDs to names/categories. Ambiguous and unresolved values remain explicit.
 - `get_character_context` retrieves only the requested `profile`, `location`, `ship`, `skills`, `skillQueue`, and/or `wallet` sections for an explicit character ID, with per-section data, freshness, and errors.
 - `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
+- `initialize_static_data` downloads and validates CCP's official static data into a local cache, reports its build/freshness, and checks for updates on request. Startup also initializes in the background.
+- `resolve_skill_plan_targets` resolves exact skill/ship names or type IDs against the cache, including explicit skill levels and unique singular skill names. Ambiguous or unresolved inputs return candidates.
+- `get_skill_dependencies` returns a public prerequisite graph with skill-level nodes and prerequisite-to-dependent edges, without login.
+- `generate_skill_plan` computes a personalized, dependency-checked plan from cached requirements and scoped character skills/queue, removes completed levels, and returns training text and estimated remaining SP.
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
+- `plan_eve_skills` interprets activity/class goals, resolves material choices, and calls the deterministic planning tools. It explains practical support, optional upgrades and eligibility limits.
 
 ESI cache headers are respected in memory, protected cache entries are isolated by credential context, and every response reports fetch/serve/expiry timestamps plus defensive page metadata. Errors include stable codes, retryability, Retry-After guidance, and a suggested action. Individual responses and bounded composite workflows use 5 MB safety ceilings. A descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/); it is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
@@ -69,7 +74,7 @@ codex mcp list
 
 The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
 
-For a named character's training or hauling plan, the intended path is `resolve_eve_entities`, then `get_character_context` with the resolved character-category ID and the `skills` and `skillQueue` sections. Other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected sections use EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
+For a named character's training plan, use `resolve_eve_entities` to select the character-category ID, `resolve_skill_plan_targets` to verify goals, then `generate_skill_plan` with that explicit character ID. The planner retrieves skills and queue itself. `get_character_context` remains available for character inspection, and other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected data uses EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
 
 To check discovery after updating the configured server, reconnect it or start a fresh host session and confirm that its tool list contains EVE Online tool titles. Try a request such as: "Use EVE Online data to review the character sheet, skills and skill queue for <exact character name>, and suggest a hauling training plan." The host should discover the EVE tools and resolve the name before retrieving the needed sections. Inspect the tool-call trace to verify that it uses MCP for ESI-covered data before inspecting the game client. This is a manual host check; the automated tests verify initialization metadata and tool listings, not model selection behavior.
 
@@ -175,10 +180,59 @@ Optional settings:
 | `EVE_CREDENTIALS_PATH`   | Overrides the OS credential file location                 |
 | `EVE_DISABLE_AUTO_SSO`   | Set to `1` to prevent browser login on protected calls    |
 | `EVE_SSO_REDIRECT_URI`   | Overrides the localhost callback for a custom application |
+| `EVE_SDE_CACHE_DIR`      | Overrides the local CCP static-data cache directory       |
 
 Do not commit tokens or client secrets. Tool responses never include the token, and callers cannot override the ESI origin or inject arbitrary headers.
 
 ## Suggested usage
+
+### Character skill training plans
+
+The executable planner supports published skills and ship hulls from CCP's [official JSONL SDE](https://developers.eveonline.com/docs/services/static-data/). On first startup it downloads the archive in the background; planning waits for initialization. The archive is roughly 95 MB at the verified build and can change in size. The cache retains the ZIP and a compact, validated skill/ship index. No character snapshots or credentials are written to this cache.
+
+Defaults are `%LOCALAPPDATA%\eve-online-mcp\sde` on Windows, `~/Library/Caches/eve-online-mcp/sde` on macOS, and `$XDG_CACHE_HOME/eve-online-mcp/sde` or `~/.cache/eve-online-mcp/sde` on Linux. Set `EVE_SDE_CACHE_DIR` in the MCP server environment for a different location. In a container this is a container path: mount a persistent volume there to retain data between runs.
+
+Each initialization checks CCP's latest-build manifest when the last successful check is at least five minutes old; `initialize_static_data` with `{"refresh":true}` checks immediately. Conditional ETag requests avoid unchanged downloads. Cache publication is atomic and the index has a SHA-256 integrity check. A failed refresh returns the last validated build with a stale warning. A missing/corrupt cache plus download failure prevents planning rather than supplying empty requirements. Downloads use fixed CCP URLs, bounded streaming and selected ZIP entries, without extracting archive paths.
+
+Example MCP tool arguments (replace `42` with the intended, verified character ID):
+
+```text
+initialize_static_data {}
+resolve_skill_plan_targets {"target":"exhumer"}
+get_skill_dependencies {"target":"Hulk"}
+generate_skill_plan {"characterId":42,"target":"Mining II"}
+generate_skill_plan {"characterId":42,"target":"exhumer"}
+generate_skill_plan {"characterId":42,"targets":[{"typeId":3386,"level":2},"Hulk"],"queuePolicy":"reorder"}
+```
+
+`target` and `targets` are mutually exclusive; at most 50 targets are accepted. Names match case-insensitively, with surrounding whitespace removed. Skills accept Roman or numeric levels I–V / 1–5. A bare skill defaults to I, so `exhumer` resolves to **Exhumers I**, not a guessed Hulk fit. Exact ship names produce minimum hull requirements; training the class skill alone does not establish that every hull can be flown. Partial names return suggestions without selecting one. Modules, rigs and complete fitting plans are outside the engine's scope.
+
+The graph uses `(skillId, level)` nodes, all six dogma prerequisite slots, and preceding-level edges. An iterative dependency traversal deduplicates shared nodes, then Kahn's topological sort orders them in **O(V + E)** time and memory for the expanded graph. A separate replay checks every step against the source requirements. Cycles and missing prerequisite metadata fail closed. Already satisfied permanent levels prune completed branches; requesting another level checks current requirements.
+
+`generate_skill_plan` requires both `esi-skills.read_skills.v1` and `esi-skills.read_skillqueue.v1` for the chosen character, checked together before either ESI request. It validates complete skills and queue snapshots, credits partial SP once, and distinguishes trained levels from active restrictions. `queuePolicy=preserve` (default) keeps the observed queue and returns **additions after that queue**, using a conditional projected baseline. `reorder` returns a proposed replacement that includes unrelated queued commitments. Future queue rows never become observed completion; contradictory past completion requires refreshed evidence. Neither policy edits the live queue.
+
+Results contain resolved targets, SDE build/freshness, character source timestamps, retained queue, ordered `plan`, graph edges, estimated missing SP, acquisition checks, and copyable `trainingText`. An empty plan means no additional levels under its declared baseline. Estimates do not establish Alpha/Omega eligibility, fit validity, budget, training duration, or optimal milestone timing. Formula rounding may differ by one SP; source caveats are returned with the result. Review the in-game import preview and available queue slots before applying text.
+
+#### Natural-language goals
+
+Select the `plan_eve_skills` MCP prompt in your host. It requires `character` (an exact character name or ID, as a string) and `goal` (a role, hull/fit, doctrine, or target skill list). Optional `constraints` captures the time horizon, Alpha/Omega state, budget, and preferences. Optional `queuePolicy` is `preserve` by default, or `reorder` to request a proposed new order while retaining unrelated commitments.
+
+Example prompt arguments:
+
+```json
+{
+  "character": "Exact Character Name",
+  "goal": "Build a practical hauling training plan with an early usable milestone",
+  "constraints": "Omega; prioritize the first two weeks; no remap or paid skill points",
+  "queuePolicy": "preserve"
+}
+```
+
+The prompt handles requests such as "I want to fly Jump Freighters" by distinguishing the class skill from a specific racial hull and asking for a material choice when needed. It verifies selected targets and calls `generate_skill_plan` for dependencies, progress subtraction, ordering and SP estimates. It separates mandatory hull unlocks, practical support and discretionary upgrades, labels eligibility and timing gaps, and preserves the tool's training text unchanged. The model does not reconstruct the dependency graph or perform a second calculation.
+
+Fetching the prompt does not fetch private data or trigger SSO. The host model subsequently uses the read-only tools. The prompt cannot change a queue, save an in-game plan, purchase/inject skills, or allocate SP. Goal interpretation and discretionary recommendations still depend on the host model; dependency expansion and personalized plan computation execute in tested code. See the [research, algorithm rationale and review scenarios](docs/skill-plan-research.md) for provenance and limits.
+
+### Adventure planning
 
 Select the `plan_eve_adventure` prompt in your MCP host, or ask something like:
 

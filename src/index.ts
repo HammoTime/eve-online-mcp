@@ -11,6 +11,7 @@ import { runAuthCommand } from "./cli.js";
 import { EsiClient } from "./esi-client.js";
 import { loadOpenApiDocument, OperationCatalog } from "./openapi.js";
 import { createEveServer } from "./server.js";
+import { StaticDataCache } from "./static-data.js";
 
 const document = await loadOpenApiDocument();
 const catalog = new OperationCatalog(document);
@@ -50,8 +51,15 @@ const interactive =
           process.env.EVE_SSO_REDIRECT_URI,
         );
 const authentication = new CharacterAuthentication(store, interactive);
+const staticData = new StaticDataCache();
+// Keep the MCP handshake responsive during the first download. Planning awaits this initialization.
+void staticData.initialize().catch(() => {
+  console.error(
+    "eve-online-mcp: static data initialization failed; retry initialize_static_data.",
+  );
+});
 
-serveStdio(() => createEveServer(catalog, client, authentication), {
+serveStdio(() => createEveServer(catalog, client, authentication, staticData), {
   onerror: (error) => {
     console.error("eve-online-mcp:", error.message);
   },

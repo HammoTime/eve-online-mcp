@@ -36,6 +36,7 @@
     "prepack": "npm run build",
     "schema:check": "tsx scripts/check-openapi-update.ts",
     "schema:update": "tsx scripts/update-openapi.ts",
+    "skills:verify-data": "tsx scripts/verify-skill-data.ts",
     "start": "node dist/index.js",
     "test": "vitest run --coverage",
     "test:watch": "vitest",
@@ -53,12 +54,14 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "jose": "^6.2.12",
     "open": "^11.0.2",
+    "yauzl": "^3.4.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^26.4.1",
+    "@types/yauzl": "^3.4.0",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.9.1",
     "eslint-config-prettier": "^10.0.0",

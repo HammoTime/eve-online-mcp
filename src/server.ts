@@ -16,7 +16,14 @@ import { operationGuidance } from "./operation-metadata.js";
 import { searchOperationsDetailed } from "./operation-search.js";
 import { OperationCatalog, publicOperation } from "./openapi.js";
 import { PACKAGE_VERSION } from "./package-metadata.js";
+import {
+  renderSkillPlanGuidance,
+  SKILL_PLAN_QUEUE_POLICIES,
+} from "./skill-plan-guidance.js";
 import type { CharacterAuthentication } from "./character-authentication.js";
+import { StaticDataCache, type StaticDataSource } from "./static-data.js";
+import { SkillPlanner } from "./skill-plan.js";
+import { planTargetSchema, targetListSchema } from "./skill-data.js";
 
 const jsonRecord = z.record(z.string(), z.json()).optional();
 const positiveSafeInteger = z
@@ -35,6 +42,7 @@ const READ_ONLY_ANNOTATIONS = {
 // Keep the first 512 characters useful on their own for host discovery.
 const SERVER_INSTRUCTIONS = [
   "Use this read-only EVE Online ESI server for character sheets, skills, skill queues, ships, wallet, assets, markets and routes. Prefer these tools for ESI data before inspecting the game client. Start with resolve_eve_entities for named characters, get_character_context for selected character data, or search_esi_operations for other ESI data.",
+  "For skill planning, resolve_skill_plan_targets verifies skill/ship goals; get_skill_dependencies returns the public graph; generate_skill_plan computes missing training for an explicit characterId. Use plan_eve_skills to interpret vague goals. initialize_static_data caches CCP's SDE automatically. Never reconstruct prerequisites or subtract trained/queued levels by reasoning when the planner is available.",
   "Resolve exact names to character-category IDs; keep ambiguous or unresolved matches explicit. Use an explicit character ID and request only the sections needed. For other endpoints, search_esi_operations, then get_esi_operation, then call_esi retrieves one page of a read-only operation.",
   "Public operations need no login. Protected character sections require EVE SSO with the appropriate scopes. Report each section's errors and freshness; public profile success does not establish access to protected data.",
   "Skills and skill queues can inform training and hauling plans. ESI does not expose Omega subscription status or saved in-game skill plans. Skill injector advice needs current game rules and explicit assumptions; this server cannot change skills, queues or game state. Use another source or an in-game check for information ESI does not expose.",
@@ -61,10 +69,119 @@ export function createEveServer(
   catalog: OperationCatalog,
   client: EsiClient,
   authentication?: CharacterAuthentication,
+  staticData: StaticDataSource = new StaticDataCache(),
 ): McpServer {
   const server = new McpServer(
     { name: "eve-online-mcp", version: PACKAGE_VERSION },
     { instructions: SERVER_INSTRUCTIONS },
+  );
+
+  const planner = new SkillPlanner(staticData, client);
+  const targetsSchema = z
+    .object({
+      target: planTargetSchema.optional(),
+      targets: targetListSchema.optional(),
+    })
+    .strict()
+    .refine(
+      (value) => (value.target === undefined) !== (value.targets === undefined),
+      "Supply exactly one of target or targets",
+    );
+  server.registerTool(
+    "initialize_static_data",
+    {
+      title: "Initialize the local EVE Online static-data cache",
+      description:
+        "Download and validate CCP's official EVE Online JSONL SDE once, cache it on this machine, and report the build/freshness. Refresh checks use ETags; failed refreshes retain a labelled older build. Public data needs no authentication. Planning also initializes automatically.",
+      inputSchema: z.object({ refresh: z.boolean().default(false) }).strict(),
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ refresh }) => {
+      try {
+        return textResult((await staticData.initialize(refresh)).status);
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "resolve_skill_plan_targets",
+    {
+      title: "Resolve EVE Online skill and ship planning targets",
+      description:
+        "Resolve public EVE Online SDE skill/ship names or type IDs deterministically before planning. Accepts Mining II, an exact hull, or Exhumer (unique singular skill alias). Bare skills default to level I. Unresolved/ambiguous inputs return candidates; never choose a hull or desired skill level for the user.",
+      inputSchema: targetsSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ target, targets }) => {
+      try {
+        const { catalog, status } = await staticData.initialize();
+        return textResult({
+          staticData: status,
+          targets: (targets ?? (target === undefined ? [] : [target])).map(
+            (value) => catalog.resolve(value),
+          ),
+        });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "get_skill_dependencies",
+    {
+      title: "Map EVE Online skill prerequisite dependencies",
+      description:
+        "Return the complete prerequisite skill-level graph for verified EVE Online SDE skill or ship targets, with directed prerequisite-to-dependent edges, deterministic topological order and cycle detection. No character data or login is used. A ship means minimum hull requirements, not fit viability.",
+      inputSchema: targetsSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ target, targets }) => {
+      try {
+        return textResult(
+          await planner.dependencies(
+            targets ?? (target === undefined ? [] : [target]),
+          ),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "generate_skill_plan",
+    {
+      title: "Generate a verified character-specific EVE Online skill plan",
+      description:
+        "Generate a deterministic EVE Online prerequisite-ordered training plan for target(s), such as Mining II, Exhumer, or an exact ship name/ID. Requires explicit characterId and complete scoped skills/queue data. Removes completed permanent skill levels, deduplicates shared dependencies, handles preserve/reorder queue policy, replays dependencies, and returns copyable training text plus estimated missing SP. Does not edit game state or calculate clone eligibility, fitting, training time or optimal milestone timing. Resolve vague goals with plan_eve_skills and resolve_skill_plan_targets first.",
+      inputSchema: z
+        .object({
+          characterId: positiveSafeInteger,
+          target: planTargetSchema.optional(),
+          targets: targetListSchema.optional(),
+          queuePolicy: z.enum(["preserve", "reorder"]).default("preserve"),
+        })
+        .strict()
+        .refine(
+          (value) =>
+            (value.target === undefined) !== (value.targets === undefined),
+          "Supply exactly one of target or targets",
+        ),
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ characterId, target, targets, queuePolicy }) => {
+      try {
+        return textResult(
+          await planner.generate({
+            characterId,
+            targets: targets ?? (target === undefined ? [] : [target]),
+            queuePolicy,
+          }),
+        );
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
   );
 
   const requireAuthentication = () => {
@@ -406,6 +523,8 @@ export function createEveServer(
                     "Retrieve only explicitly selected character sections; characterId is always required.",
                   get_market_snapshot:
                     "Collect a bounded public regional order snapshot and observed aggregates.",
+                  skill_planning:
+                    "Use initialize_static_data for the local CCP cache, resolve_skill_plan_targets for verified goals, get_skill_dependencies for a public graph, and generate_skill_plan for missing training with an explicit characterId. plan_eve_skills interprets vague goals and explains limits.",
                 },
                 access:
                   "Public discovery and public operations never authenticate. Missing character credentials automatically open EVE SSO. Use list_eve_characters to inspect safe authorization metadata, authorize_eve_character to renew consent, and select_eve_character when a protected operation without a character path needs an explicit default. Never ask the user to handle tokens or run commands.",
@@ -416,6 +535,50 @@ export function createEveServer(
             null,
             2,
           ),
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "plan_eve_skills",
+    {
+      title: "Plan an EVE character's skill training",
+      description:
+        "Interpret a character's training goal, verify skill/hull targets, and use generate_skill_plan for deterministic dependencies and missing training; explain optional support and eligibility/timing limits",
+      argsSchema: z.object({
+        character: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Exact EVE character name or positive character ID"),
+        goal: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Desired role, ship/fit, doctrine, or target skill levels"),
+        constraints: z
+          .string()
+          .optional()
+          .describe(
+            "Time horizon, Alpha/Omega state, budget, priorities, or other training constraints",
+          ),
+        queuePolicy: z
+          .enum(SKILL_PLAN_QUEUE_POLICIES)
+          .optional()
+          .describe(
+            "preserve (default): append after existing commitments; reorder: propose a new order while retaining unrelated training",
+          ),
+      }),
+    },
+    (request) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: renderSkillPlanGuidance(request),
+          },
         },
       ],
     }),
