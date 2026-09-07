@@ -313,6 +313,93 @@ describe("EVE MCP server", () => {
     ).rejects.toThrow();
   });
 
+  it("discovers and renders character skill planning without ESI or authentication", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const getAccessToken = vi.fn<StaticTokenProvider["getAccessToken"]>();
+    const catalog = new OperationCatalog(fixtureDocument());
+    const client = await connectedClient(
+      new EsiClient(catalog, { getAccessToken }, { fetchImplementation }),
+    );
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((prompt) => prompt.name)).toEqual(
+      expect.arrayContaining(["plan_eve_adventure", "plan_eve_skills"]),
+    );
+    const metadata = prompts.find(
+      (prompt) => prompt.name === "plan_eve_skills",
+    );
+    expect(metadata?.arguments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "character", required: true }),
+        expect.objectContaining({ name: "goal", required: true }),
+        expect.objectContaining({ name: "constraints", required: false }),
+        expect.objectContaining({ name: "queuePolicy", required: false }),
+      ]),
+    );
+    const prompt = await client.getPrompt({
+      name: "plan_eve_skills",
+      arguments: {
+        character: "Example Pilot",
+        goal: "Useful hauling milestones",
+      },
+    });
+    expect(prompt.messages).toHaveLength(1);
+    expect(prompt.messages[0]).toMatchObject({
+      role: "user",
+      content: { type: "text" },
+    });
+    const content = prompt.messages[0]?.content;
+    expect(content?.type).toBe("text");
+    if (content?.type !== "text") throw new Error("Expected prompt text");
+    expect(JSON.parse(content.text.split("\n\n")[2] ?? "")).toEqual({
+      character: "Example Pilot",
+      goal: "Useful hauling milestones",
+      queuePolicy: "preserve",
+    });
+    expect(content.text).toContain("Preserve the entire existing queue");
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("accepts explicit character IDs, constraints and the proposed-reorder policy", async () => {
+    const client = await connectedClient();
+    const prompt = await client.getPrompt({
+      name: "plan_eve_skills",
+      arguments: {
+        character: "123",
+        goal: "Exploration",
+        constraints: "Alpha; no spending",
+        queuePolicy: "reorder",
+      },
+    });
+    const content = prompt.messages[0]?.content;
+    if (content?.type !== "text") throw new Error("Expected prompt text");
+    expect(JSON.parse(content.text.split("\n\n")[2] ?? "")).toEqual({
+      character: "123",
+      goal: "Exploration",
+      constraints: "Alpha; no spending",
+      queuePolicy: "reorder",
+    });
+    expect(content.text).toContain("Propose a reordered queue");
+    expect(content.text).not.toContain("Preserve the entire existing queue");
+    expect(content.text).toContain("This is advice only");
+  });
+
+  it.each([
+    { goal: "Hauling" },
+    { character: "123" },
+    { character: " ", goal: "Hauling" },
+    { character: "123", goal: " " },
+    { character: "123", goal: "Hauling", queuePolicy: "discard" },
+  ])(
+    "rejects incomplete or invalid skill-plan arguments: %j",
+    async (arguments_) => {
+      const client = await connectedClient();
+      await expect(
+        client.getPrompt({ name: "plan_eve_skills", arguments: arguments_ }),
+      ).rejects.toThrow();
+    },
+  );
+
   it("rejects invalid strict workflow inputs through MCP", async () => {
     const client = await connectedClient();
     const both = await client.callTool({

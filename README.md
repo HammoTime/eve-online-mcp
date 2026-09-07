@@ -16,6 +16,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
+- `plan_eve_skills` is a prompt for character-specific training plans with verified prerequisites, useful milestones, existing-queue handling, clone restrictions, and conditional time estimates.
 
 ESI cache headers are respected in memory, protected cache entries are isolated by credential context, and every response reports fetch/serve/expiry timestamps plus defensive page metadata. Errors include stable codes, retryability, Retry-After guidance, and a suggested action. Individual responses and bounded composite workflows use 5 MB safety ceilings. A descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/); it is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
@@ -179,6 +180,27 @@ Optional settings:
 Do not commit tokens or client secrets. Tool responses never include the token, and callers cannot override the ESI origin or inject arbitrary headers.
 
 ## Suggested usage
+
+### Character skill training plans
+
+Select the `plan_eve_skills` MCP prompt in your host. It requires `character` (an exact character name or ID, as a string) and `goal` (a role, hull/fit, doctrine, or target skill list). Optional `constraints` captures the time horizon, Alpha/Omega state, budget, and preferences. Optional `queuePolicy` is `preserve` by default, or `reorder` to request a proposed new order while retaining unrelated commitments.
+
+Example prompt arguments:
+
+```json
+{
+  "character": "Exact Character Name",
+  "goal": "Build a practical hauling training plan with an early usable milestone",
+  "constraints": "Omega; prioritize the first two weeks; no remap or paid skill points",
+  "queuePolicy": "preserve"
+}
+```
+
+The prompt guides the model to resolve the character, retrieve skills and queue, verify current type requirements, expand and deduplicate prerequisite levels, and replay the proposed order. It distinguishes permanent training from active skill restrictions and future queue progress, credits partial SP once, and separates mandatory unlocks from useful support and optional specialization. It also addresses Alpha caps, missing skill acquisition, queue limits, and evidence gaps. The output includes milestones, an ordered plan, assumptions, and copyable training text when verified.
+
+Fetching the prompt does not fetch private data or trigger SSO. The host model subsequently uses the existing read-only tools. The prompt cannot change a queue, save an in-game plan, purchase/inject skills, or allocate SP. It does not add a standalone installed skill or an executable planning engine; dependency checks and calculations are instructions for the host model. Its effectiveness depends on that model and the available evidence. See the [research and review scenarios](docs/skill-plan-research.md) for source provenance, known limitations, and cases to assess with your chosen model.
+
+### Adventure planning
 
 Select the `plan_eve_adventure` prompt in your MCP host, or ask something like:
 

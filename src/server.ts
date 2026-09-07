@@ -16,6 +16,10 @@ import { operationGuidance } from "./operation-metadata.js";
 import { searchOperationsDetailed } from "./operation-search.js";
 import { OperationCatalog, publicOperation } from "./openapi.js";
 import { PACKAGE_VERSION } from "./package-metadata.js";
+import {
+  renderSkillPlanGuidance,
+  SKILL_PLAN_QUEUE_POLICIES,
+} from "./skill-plan-guidance.js";
 import type { CharacterAuthentication } from "./character-authentication.js";
 
 const jsonRecord = z.record(z.string(), z.json()).optional();
@@ -416,6 +420,50 @@ export function createEveServer(
             null,
             2,
           ),
+        },
+      ],
+    }),
+  );
+
+  server.registerPrompt(
+    "plan_eve_skills",
+    {
+      title: "Plan an EVE character's skill training",
+      description:
+        "Create a character-specific training plan with verified prerequisites, useful milestones, queue reconciliation, clone restrictions, and explicit timing assumptions",
+      argsSchema: z.object({
+        character: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Exact EVE character name or positive character ID"),
+        goal: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Desired role, ship/fit, doctrine, or target skill levels"),
+        constraints: z
+          .string()
+          .optional()
+          .describe(
+            "Time horizon, Alpha/Omega state, budget, priorities, or other training constraints",
+          ),
+        queuePolicy: z
+          .enum(SKILL_PLAN_QUEUE_POLICIES)
+          .optional()
+          .describe(
+            "preserve (default): append after existing commitments; reorder: propose a new order while retaining unrelated training",
+          ),
+      }),
+    },
+    (request) => ({
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: renderSkillPlanGuidance(request),
+          },
         },
       ],
     }),
