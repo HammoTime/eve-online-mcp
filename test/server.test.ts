@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StaticTokenProvider } from "../src/auth.js";
@@ -54,6 +55,18 @@ async function connectedClient() {
 }
 
 describe("EVE MCP server", () => {
+  it("reports the installed package version during MCP initialization", async () => {
+    const metadata = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    const client = await connectedClient();
+
+    expect(client.getServerVersion()).toEqual({
+      name: "eve-online-mcp",
+      version: metadata.version,
+    });
+  });
+
   it("exposes the discovery and call tools over MCP", async () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();

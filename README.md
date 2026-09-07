@@ -54,6 +54,8 @@ Once published, configure your MCP host to run the npm package directly:
 
 For a local checkout, build in the devcontainer and use `node /absolute/path/to/eve-online-mcp/dist/index.js` instead.
 
+During MCP initialization, the server reports the version from its installed `package.json`, so MCP host diagnostics identify the running package release.
+
 ### EVE SSO
 
 Public ESI routes need no credentials and never trigger login. On the first operation that needs character or corporation data, the server automatically opens EVE SSO in the browser. After consent it stores only the refresh credential in the user's OS configuration directory, rotates it when EVE returns a replacement, and manages short-lived access tokens in memory. No client secret or manual token handling is required.
