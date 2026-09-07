@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StaticTokenProvider } from "../src/auth.js";
@@ -11,7 +12,7 @@ afterEach(async () =>
   Promise.all(connections.splice(0).map(async (value) => value.close())),
 );
 
-async function connectedClient() {
+async function connectedClient(esiOverride?: EsiClient) {
   const catalog = new OperationCatalog(fixtureDocument());
   const esiClient = new EsiClient(catalog, new StaticTokenProvider(undefined), {
     baseUrl: "http://localhost",
@@ -43,7 +44,7 @@ async function connectedClient() {
         );
       }),
   });
-  const server = createEveServer(catalog, esiClient);
+  const server = createEveServer(catalog, esiOverride ?? esiClient);
   const client = new Client({ name: "test-client", version: "1.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -54,10 +55,102 @@ async function connectedClient() {
 }
 
 describe("EVE MCP server", () => {
+  it("reports the installed package version during MCP initialization", async () => {
+    const metadata = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    const client = await connectedClient();
+
+    expect(client.getServerVersion()).toEqual({
+      name: "eve-online-mcp",
+      version: metadata.version,
+    });
+  });
+
+  it("advertises EVE discovery guidance during initialization without ESI access", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const getAccessToken = vi.fn<StaticTokenProvider["getAccessToken"]>();
+    const catalog = new OperationCatalog(fixtureDocument());
+    const client = await connectedClient(
+      new EsiClient(catalog, { getAccessToken }, { fetchImplementation }),
+    );
+
+    const instructions = client.getInstructions() ?? "";
+    const discoverySummary = instructions.slice(0, 512);
+    expect(discoverySummary).toContain("EVE Online");
+    expect(discoverySummary).toMatch(/read-only/i);
+    expect(discoverySummary).toContain("character sheets");
+    expect(discoverySummary).toContain("skill queues");
+    expect(discoverySummary).toContain("game client");
+    for (const name of [
+      "resolve_eve_entities",
+      "get_character_context",
+      "search_esi_operations",
+    ]) {
+      expect(discoverySummary).toContain(name);
+    }
+    expect(instructions).toContain("explicit character ID");
+    expect(instructions).toContain("Public operations need no login");
+    expect(instructions).toContain("EVE SSO");
+    expect(instructions).toContain("does not expose Omega subscription status");
+    expect(instructions).toContain("saved in-game skill plans");
+
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      expect(tool.title).toContain("EVE Online");
+      expect(tool.description).toContain("EVE Online");
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: ![
+          "authorize_eve_character",
+          "select_eve_character",
+        ].includes(tool.name),
+        destructiveHint: false,
+        idempotentHint: tool.name !== "authorize_eve_character",
+      });
+    }
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("describes character planning entry points in the tool listing", async () => {
+    const client = await connectedClient();
+    const { tools } = await client.listTools();
+    const resolve = tools.find((tool) => tool.name === "resolve_eve_entities");
+    expect(resolve?.description).toContain("character names");
+    expect(resolve?.description).toContain("get_character_context");
+    const character = tools.find(
+      (tool) => tool.name === "get_character_context",
+    );
+    for (const keyword of [
+      "character sheet",
+      "skills",
+      "skill queue",
+      "hauling",
+      "skill plans",
+      "skill injector",
+      "EVE SSO",
+    ]) {
+      expect(character?.description).toContain(keyword);
+    }
+    expect(character?.inputSchema.properties).toMatchObject({
+      characterId: {
+        description: expect.stringContaining("resolve_eve_entities"),
+      },
+      sections: { description: expect.stringContaining("skillQueue") },
+    });
+    const search = tools.find((tool) => tool.name === "search_esi_operations");
+    expect(search?.description).toContain("assets");
+    expect(search?.description).toContain("routes");
+    expect(search?.description).toContain("get_esi_operation");
+  });
+
   it("exposes the discovery and call tools over MCP", async () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
+      "list_eve_characters",
+      "authorize_eve_character",
+      "select_eve_character",
       "search_esi_operations",
       "get_esi_operation",
       "call_esi",

@@ -47,6 +47,8 @@ describe("auth CLI", () => {
 
     const store = new CredentialStore(env.EVE_CREDENTIALS_PATH);
     await store.write({
+      characterId: 42,
+      characterName: "Test Pilot",
       clientId: "client",
       refreshToken: "refresh",
       scopes: ["one", "two"],

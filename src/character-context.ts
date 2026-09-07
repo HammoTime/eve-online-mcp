@@ -62,7 +62,7 @@ export async function getCharacterContext(
   let authorizationError: unknown;
   if (requiredScopes.length > 0) {
     try {
-      authorization = await client.authorize(requiredScopes);
+      authorization = await client.authorize(requiredScopes, input.characterId);
     } catch (error) {
       authorizationError = error;
     }

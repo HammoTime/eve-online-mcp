@@ -1,10 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import open from "open";
-import { CredentialStore, type StoredCredential } from "./credential-store.js";
+import {
+  CredentialStore,
+  type CharacterCredential,
+} from "./credential-store.js";
+import {
+  createTokenVerifier,
+  SSO_METADATA_URL,
+  type TokenVerifier,
+} from "./token-identity.js";
 
-const SSO_METADATA_URL =
-  "https://login.eveonline.com/.well-known/oauth-authorization-server";
 export const DEFAULT_REDIRECT_URI = "http://localhost:52765/callback";
 
 interface SsoMetadata {
@@ -26,11 +32,15 @@ export interface SsoLoginOptions {
   fetchImplementation?: typeof fetch;
   openBrowser?: (url: string) => Promise<void>;
   timeoutMs?: number;
+  expectedCharacterId?: number;
+  verifyToken?: TokenVerifier;
 }
 
 export interface SsoLoginResult {
   credentialPath: string;
   scopes: string[];
+  characterId: number;
+  characterName: string;
 }
 
 export function createPkce(): { verifier: string; challenge: string } {
@@ -199,7 +209,15 @@ async function exchangeAuthorizationCode(
       `EVE SSO token exchange failed with HTTP ${response.status}`,
     );
   const token = (await response.json()) as Partial<AuthorizationTokenResponse>;
-  if (!token.access_token || !token.refresh_token || !token.expires_in)
+  if (
+    typeof token.access_token !== "string" ||
+    !token.access_token ||
+    typeof token.refresh_token !== "string" ||
+    !token.refresh_token ||
+    typeof token.expires_in !== "number" ||
+    !Number.isFinite(token.expires_in) ||
+    token.expires_in <= 0
+  )
     throw new Error("EVE SSO returned an invalid authorization response");
   return token as AuthorizationTokenResponse;
 }
@@ -233,6 +251,10 @@ export async function loginWithEveSso(
     redirect,
     state,
     async () => {
+      if (options.expectedCharacterId !== undefined)
+        console.error(
+          `Authorize EVE character ${options.expectedCharacterId}; select that character in the browser.`,
+        );
       console.error(
         `Open this URL to sign in with EVE Online:\n${authorizationUrl.href}\n`,
       );
@@ -251,12 +273,29 @@ export async function loginWithEveSso(
     { clientId: options.clientId, redirectUri, code, verifier },
     fetchImplementation,
   );
-  const credential: StoredCredential = {
+  const identity = await (
+    options.verifyToken ?? createTokenVerifier(fetchImplementation)
+  )(token.access_token, options.clientId);
+  if (
+    options.expectedCharacterId !== undefined &&
+    identity.characterId !== options.expectedCharacterId
+  )
+    throw new Error(
+      `EVE SSO selected character ${identity.characterId}, but character ${options.expectedCharacterId} was requested. Select the requested character in EVE SSO and try again; no credential was saved.`,
+    );
+  const missingScopes = scopes.filter(
+    (scope) => !identity.scopes.includes(scope),
+  );
+  if (missingScopes.length)
+    throw new Error(
+      `Character ${identity.characterId} did not grant required scopes: ${missingScopes.join(", ")}. Authorize this character again.`,
+    );
+  const credential: CharacterCredential = {
     clientId: options.clientId,
     refreshToken: token.refresh_token,
-    scopes,
+    ...identity,
     createdAt: new Date().toISOString(),
   };
   await store.write(credential);
-  return { credentialPath: store.path, scopes: credential.scopes };
+  return { credentialPath: store.path, ...identity };
 }

@@ -6,6 +6,8 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 
 ## What the MCP server exposes
 
+- `list_eve_characters` lists saved character IDs, names, and granted scopes without exposing credentials.
+- `authorize_eve_character` opens browser consent for a specific character, verifies the selected identity, and stores that character's refresh credential. `select_eve_character` chooses a saved character for protected operations that do not name one. These tools manage local authentication only; they never change game state.
 - `search_esi_operations` ranks endpoints using deterministic lexical and curated intent matching, supports hard tag/authentication filters and offsets, and explains every match.
 - `get_esi_operation` returns exact parameters, request-body schema, required caller inputs, defaults, pagination guidance, OAuth scopes, cache hints, safe examples where available, and rate-limit metadata.
 - `call_esi` invokes one page of one catalogued read operation. It rejects undeclared parameters, validates values, fixes the origin to ESI, supplies compatibility headers, and never accepts an Authorization header from a tool call.
@@ -54,16 +56,41 @@ Once published, configure your MCP host to run the npm package directly:
 
 For a local checkout, build in the devcontainer and use `node /absolute/path/to/eve-online-mcp/dist/index.js` instead.
 
+During MCP initialization, the server reports the version from its installed `package.json`, so MCP host diagnostics identify the running package release.
+
+### Discovery in Codex and other MCP hosts
+
+Installing the npm package makes the executable available; the MCP host must also be configured to launch it. For [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), register the stdio server with:
+
+```sh
+codex mcp add eve-online -- npx -y eve-online-mcp
+codex mcp list
+```
+
+The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
+
+For a named character's training or hauling plan, the intended path is `resolve_eve_entities`, then `get_character_context` with the resolved character-category ID and the `skills` and `skillQueue` sections. Other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected sections use EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
+
+To check discovery after updating the configured server, reconnect it or start a fresh host session and confirm that its tool list contains EVE Online tool titles. Try a request such as: "Use EVE Online data to review the character sheet, skills and skill queue for <exact character name>, and suggest a hauling training plan." The host should discover the EVE tools and resolve the name before retrieving the needed sections. Inspect the tool-call trace to verify that it uses MCP for ESI-covered data before inspecting the game client. This is a manual host check; the automated tests verify initialization metadata and tool listings, not model selection behavior.
+
+If the host still overlooks the server, capture the exact prompt, host/model version, configured server command and arguments, initialization instructions, tool listing and relevant tool-call sequence. Exclude credentials, tokens and private character responses from a shared report. This distinguishes a connection or stale-metadata problem from a host tool-selection problem.
+
 ### EVE SSO
 
-Public ESI routes need no credentials and never trigger login. On the first operation that needs character or corporation data, the server automatically opens EVE SSO in the browser. After consent it stores only the refresh credential in the user's OS configuration directory, rotates it when EVE returns a replacement, and manages short-lived access tokens in memory. No client secret or manual token handling is required.
+Public ESI routes need no credentials and never trigger login. Ask Codex for a character's protected data: when that character has no saved authorization, the server automatically opens EVE SSO in the browser. Select the requested character and approve access; the server verifies the identity, saves its separate refresh credential, and continues the request. Repeat for another character on the same or a different EVE account. Previously authorized characters remain available. No commands, client secret, or manual token handling are required.
+
+Credentials are stored per character, not per EVE account. Both `call_esi` and `get_character_context` select the credential matching the requested `character_id`/`characterId`. A wrong-character browser selection saves nothing and reports the requested and selected IDs. Tokens with a different or unreadable character subject are rejected before making a protected character request. A remaining upstream 403 identifies the character and required scopes; ownership or corporation roles can still deny access even with the correct character.
+
+Codex can inspect saved authorizations using `list_eve_characters` and renew consent using `authorize_eve_character` when scopes are missing or a grant has expired or been revoked. For corporation, fleet, or structure operations without a character path parameter, a sole saved character is used automatically. With multiple saved characters and no default, the server asks Codex to use `select_eve_character` for the intended character. This default never overrides a character-specific request. Login dialogs are serialized, and simultaneous requests for the same missing character share a successful login.
+
+The versioned credential file lives in the user's OS configuration directory. Each entry stores a character ID/name, client ID, granted scopes, creation time, and refresh token. Access tokens stay in memory. Login and refresh validate EVE's signature, issuer, audiences, expiration, and character claims. Refresh-token rotation updates only the matching character; writes use a restricted-permission temporary file, atomic replacement, and locks to coordinate concurrent processes. Running servers reread the store to notice new consent or removal. Old single-credential files migrate on their next protected use after the character identity is verified; adding a new character before migration preserves the legacy credential.
 
 The package ships with this public PKCE client configuration:
 
 - Client ID: `6a65f1e650d240659dafbad29fb55e05`
 - Callback URL: `http://localhost:52765/callback`
 
-The callback must match the EVE application registration exactly. PKCE is intended for local applications that cannot keep a client secret, so never distribute or commit the client secret. The login can also be started or managed explicitly:
+The callback must match the EVE application registration exactly. PKCE is intended for local applications that cannot keep a client secret, so never distribute or commit the client secret. Optional maintenance commands are available, but are not needed for the Codex workflow. `auth logout` removes all local character credentials:
 
 ```sh
 npx eve-online-mcp auth login
@@ -136,7 +163,7 @@ esi-wallet.read_corporation_wallets.v1
 
 </details>
 
-`EVE_ACCESS_TOKEN`, `EVE_REFRESH_TOKEN`, `EVE_CLIENT_ID`, and `EVE_CLIENT_SECRET` remain supported as non-default overrides for automation or existing credentials. The server reports missing JWT scopes before spending an ESI request.
+`EVE_ACCESS_TOKEN`, `EVE_REFRESH_TOKEN`, `EVE_CLIENT_ID`, and `EVE_CLIENT_SECRET` remain supported as non-default overrides for automation or existing credentials. An environment token override represents one character and takes precedence over the local store; browser authorization tools are unavailable in that mode. Character requests still check the token subject and required scopes before spending an ESI request. Remove the token override to use automatic multi-character login.
 
 Optional settings:
 
