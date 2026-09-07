@@ -103,6 +103,12 @@ describe("EVE SSO", () => {
       redirectUri,
       store,
       fetchImplementation: fetchMock,
+      verifyToken: () =>
+        Promise.resolve({
+          characterId: 42,
+          characterName: "Test Pilot",
+          scopes: ["scope.one", "scope.two"],
+        }),
       openBrowser: async (authorizationUrl) => {
         const url = new URL(authorizationUrl);
         const callback = new URL(redirectUri);
@@ -114,6 +120,8 @@ describe("EVE SSO", () => {
 
     expect(result).toEqual({
       credentialPath: "/test/credentials.json",
+      characterId: 42,
+      characterName: "Test Pilot",
       scopes: ["scope.one", "scope.two"],
     });
     expect(write).toHaveBeenCalledWith(
@@ -127,6 +135,72 @@ describe("EVE SSO", () => {
       "short-lived-access-token",
     );
   });
+
+  it.each(["wrong character", "missing scopes", "invalid signature"])(
+    "does not save credentials after %s",
+    async (failure) => {
+      const redirectUri = `http://127.0.0.1:${await unusedPort()}/callback`;
+      const write = vi.fn<CredentialStore["write"]>();
+      const store = {
+        path: "/test/credentials.json",
+        write,
+      } as unknown as CredentialStore;
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              authorization_endpoint:
+                "https://login.eveonline.com/v2/oauth/authorize",
+              token_endpoint: "https://login.eveonline.com/v2/oauth/token",
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              access_token: "fake-access",
+              refresh_token: "fake-refresh",
+              expires_in: 1200,
+            }),
+          ),
+        );
+      await expect(
+        loginWithEveSso({
+          clientId: "test-client",
+          scopes: ["scope.one"],
+          expectedCharacterId: 42,
+          redirectUri,
+          store,
+          fetchImplementation: fetchMock,
+          verifyToken: () =>
+            failure === "invalid signature"
+              ? Promise.reject(new Error("invalid signature"))
+              : Promise.resolve({
+                  characterId: failure === "wrong character" ? 43 : 42,
+                  characterName: "Test Pilot",
+                  scopes: failure === "missing scopes" ? [] : ["scope.one"],
+                }),
+          openBrowser: async (url) => {
+            const callback = new URL(redirectUri);
+            callback.searchParams.set(
+              "state",
+              new URL(url).searchParams.get("state") ?? "",
+            );
+            callback.searchParams.set("code", "fake-code");
+            await fetch(callback);
+          },
+        }),
+      ).rejects.toThrow(
+        failure === "wrong character"
+          ? "character 42 was requested"
+          : failure === "missing scopes"
+            ? "did not grant"
+            : "invalid signature",
+      );
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects invalid login configuration", async () => {
     await expect(
