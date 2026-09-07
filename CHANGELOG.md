@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.2...v0.4.0) (2026-09-07)
+
+
+### Features
+
+* release multi-character auth and MCP discovery fixes ([#42](https://github.com/HammoTime/eve-online-mcp/issues/42)) ([07893a9](https://github.com/HammoTime/eve-online-mcp/commit/07893a9bf9458b32484efaca0ee11a9cf09a740d))
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the vitest group with 2 updates ([#34](https://github.com/HammoTime/eve-online-mcp/issues/34)) ([359950e](https://github.com/HammoTime/eve-online-mcp/commit/359950e9fc4947210633c30144870eb932ef326a))
+
 ## [0.3.2](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.1...v0.3.2) (2026-09-06)
 
 
