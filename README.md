@@ -54,6 +54,23 @@ Once published, configure your MCP host to run the npm package directly:
 
 For a local checkout, build in the devcontainer and use `node /absolute/path/to/eve-online-mcp/dist/index.js` instead.
 
+### Discovery in Codex and other MCP hosts
+
+Installing the npm package makes the executable available; the MCP host must also be configured to launch it. For [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), register the stdio server with:
+
+```sh
+codex mcp add eve-online -- npx -y eve-online-mcp
+codex mcp list
+```
+
+The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
+
+For a named character's training or hauling plan, the intended path is `resolve_eve_entities`, then `get_character_context` with the resolved character-category ID and the `skills` and `skillQueue` sections. Other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected sections use EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
+
+To check discovery after updating the configured server, reconnect it or start a fresh host session and confirm that its tool list contains EVE Online tool titles. Try a request such as: "Use EVE Online data to review the character sheet, skills and skill queue for <exact character name>, and suggest a hauling training plan." The host should discover the EVE tools and resolve the name before retrieving the needed sections. Inspect the tool-call trace to verify that it uses MCP for ESI-covered data before inspecting the game client. This is a manual host check; the automated tests verify initialization metadata and tool listings, not model selection behavior.
+
+If the host still overlooks the server, capture the exact prompt, host/model version, configured server command and arguments, initialization instructions, tool listing and relevant tool-call sequence. Exclude credentials, tokens and private character responses from a shared report. This distinguishes a connection or stale-metadata problem from a host tool-selection problem.
+
 ### EVE SSO
 
 Public ESI routes need no credentials and never trigger login. On the first operation that needs character or corporation data, the server automatically opens EVE SSO in the browser. After consent it stores only the refresh credential in the user's OS configuration directory, rotates it when EVE returns a replacement, and manages short-lived access tokens in memory. No client secret or manual token handling is required.
