@@ -71,6 +71,9 @@ describe("EVE MCP server", () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
+      "list_eve_characters",
+      "authorize_eve_character",
+      "select_eve_character",
       "search_esi_operations",
       "get_esi_operation",
       "call_esi",

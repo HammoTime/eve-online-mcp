@@ -8,11 +8,65 @@ import {
 import { OperationCatalog } from "../src/openapi.js";
 import { fixtureDocument } from "./fixtures.js";
 
-function scopedJwt(): string {
-  return `header.${Buffer.from(JSON.stringify({ scp: ["esi-assets.read_assets.v1"] })).toString("base64url")}.sig`;
+function scopedJwt(characterId = 42): string {
+  return `header.${Buffer.from(JSON.stringify({ sub: `CHARACTER:EVE:${characterId}`, scp: ["esi-assets.read_assets.v1"] })).toString("base64url")}.sig`;
 }
 
 describe("EsiClient", () => {
+  it("rejects mismatched character tokens and cross-character preflight reuse before any ESI request", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = new EsiClient(
+      new OperationCatalog(fixtureDocument()),
+      new StaticTokenProvider(scopedJwt(42)),
+      { fetchImplementation: fetchMock },
+    );
+    await expect(
+      client.call({
+        operationId: "GetCharacterAssets",
+        path: { character_id: 43 },
+      }),
+    ).rejects.toMatchObject({
+      code: "CHARACTER_MISMATCH",
+      details: { characterId: 43, authenticatedCharacterId: 42 },
+    });
+    const authorization = await client.authorize(
+      ["esi-assets.read_assets.v1"],
+      42,
+    );
+    await expect(
+      client.call(
+        { operationId: "GetCharacterAssets", path: { character_id: 43 } },
+        authorization,
+      ),
+    ).rejects.toMatchObject({ code: "CHARACTER_MISMATCH" });
+    await expect(
+      client.authorize(["esi-assets.read_assets.v1"], -1),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("identifies the character on upstream access denial without echoing upstream credentials", async () => {
+    const client = new EsiClient(
+      new OperationCatalog(fixtureDocument()),
+      new StaticTokenProvider(scopedJwt(42)),
+      {
+        fetchImplementation: vi.fn<typeof fetch>().mockResolvedValue(
+          new Response(JSON.stringify({ error: "sensitive-marker" }), {
+            status: 403,
+          }),
+        ),
+      },
+    );
+    const error = await client
+      .call({ operationId: "GetCharacterAssets", path: { character_id: 42 } })
+      .catch((failure: unknown) => publicEsiError(failure));
+    expect(error).toMatchObject({
+      code: "FORBIDDEN",
+      details: { characterId: 42, authenticatedCharacterId: 42 },
+    });
+    expect(JSON.stringify(error)).not.toContain("sensitive-marker");
+  });
+
   it("constructs allowlisted requests, supplies defaults, authenticates, and caches", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify([{ type_id: 34 }]), {
@@ -288,7 +342,7 @@ describe("EsiClient", () => {
   it("reports invalid dates/page counts as unknown", async () => {
     const client = new EsiClient(
       new OperationCatalog(fixtureDocument()),
-      new StaticTokenProvider(scopedJwt()),
+      new StaticTokenProvider(scopedJwt(1)),
       {
         baseUrl: "http://localhost",
         fetchImplementation: vi.fn<typeof fetch>().mockResolvedValue(
@@ -320,7 +374,7 @@ describe("EsiClient", () => {
 
   it("isolates protected caches across token contexts", async () => {
     const token = (marker: string) =>
-      `h.${Buffer.from(JSON.stringify({ scp: ["esi-assets.read_assets.v1"], marker })).toString("base64url")}.s`;
+      `h.${Buffer.from(JSON.stringify({ sub: "CHARACTER:EVE:1", scp: ["esi-assets.read_assets.v1"], marker })).toString("base64url")}.s`;
     let current = token("one");
     const provider = { getAccessToken: vi.fn(() => Promise.resolve(current)) };
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(() =>
