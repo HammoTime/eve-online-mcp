@@ -1,5 +1,5 @@
 import { DEFAULT_EVE_CLIENT_ID } from "./auth.js";
-import { CredentialStore } from "./credential-store.js";
+import { CredentialStore, defaultCredentialPath } from "./credential-store.js";
 import { loginWithEveSso } from "./sso.js";
 import type { OperationCatalog } from "./openapi.js";
 
@@ -24,7 +24,7 @@ export async function runAuthCommand(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
   if (args[0] !== "auth") return false;
-  const store = new CredentialStore(environment.EVE_CREDENTIALS_PATH);
+  const store = new CredentialStore(defaultCredentialPath(environment));
   const command = args[1];
   if (command === "login") {
     const clientId =
@@ -45,11 +45,18 @@ export async function runAuthCommand(
     return true;
   }
   if (command === "status") {
-    const credential = await store.read();
+    const file = await store.read();
     console.log(
-      credential
-        ? `EVE SSO is configured for client ${credential.clientId} with ${credential.scopes.length} scopes.`
-        : "EVE SSO is not configured. Public ESI operations remain available.",
+      file.characters.length
+        ? file.characters
+            .map(
+              (entry) =>
+                `${entry.characterName} (${entry.characterId}): ${entry.scopes.length} scopes${file.defaultCharacterId === entry.characterId ? " (default)" : ""}`,
+            )
+            .join("\n")
+        : file.legacyCredential
+          ? "A legacy EVE SSO credential will migrate on the next protected request."
+          : "EVE SSO is not configured. Public ESI operations remain available.",
     );
     return true;
   }
