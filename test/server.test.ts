@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StaticTokenProvider } from "../src/auth.js";
@@ -54,6 +55,18 @@ async function connectedClient(esiOverride?: EsiClient) {
 }
 
 describe("EVE MCP server", () => {
+  it("reports the installed package version during MCP initialization", async () => {
+    const metadata = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    const client = await connectedClient();
+
+    expect(client.getServerVersion()).toEqual({
+      name: "eve-online-mcp",
+      version: metadata.version,
+    });
+  });
+
   it("advertises EVE discovery guidance during initialization without ESI access", async () => {
     const fetchImplementation = vi.fn<typeof fetch>();
     const getAccessToken = vi.fn<StaticTokenProvider["getAccessToken"]>();

@@ -56,6 +56,8 @@ Once published, configure your MCP host to run the npm package directly:
 
 For a local checkout, build in the devcontainer and use `node /absolute/path/to/eve-online-mcp/dist/index.js` instead.
 
+During MCP initialization, the server reports the version from its installed `package.json`, so MCP host diagnostics identify the running package release.
+
 ### Discovery in Codex and other MCP hosts
 
 Installing the npm package makes the executable available; the MCP host must also be configured to launch it. For [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), register the stdio server with:

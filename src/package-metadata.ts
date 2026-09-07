@@ -9,6 +9,8 @@ const packageMetadata = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as PackageMetadata;
 
+export const PACKAGE_VERSION = packageMetadata.version;
+
 const CONTACT = "adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp";
 
 export const DEFAULT_ESI_USER_AGENT = `${packageMetadata.name}/${packageMetadata.version} (${CONTACT})`;

@@ -15,6 +15,7 @@ import { getMarketSnapshot } from "./market-snapshot.js";
 import { operationGuidance } from "./operation-metadata.js";
 import { searchOperationsDetailed } from "./operation-search.js";
 import { OperationCatalog, publicOperation } from "./openapi.js";
+import { PACKAGE_VERSION } from "./package-metadata.js";
 import type { CharacterAuthentication } from "./character-authentication.js";
 
 const jsonRecord = z.record(z.string(), z.json()).optional();
@@ -62,7 +63,7 @@ export function createEveServer(
   authentication?: CharacterAuthentication,
 ): McpServer {
   const server = new McpServer(
-    { name: "eve-online-mcp", version: "0.1.0" },
+    { name: "eve-online-mcp", version: PACKAGE_VERSION },
     { instructions: SERVER_INSTRUCTIONS },
   );
 
