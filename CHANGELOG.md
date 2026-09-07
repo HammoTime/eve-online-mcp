@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.4.0...v0.5.0) (2026-09-07)
+
+
+### Features
+
+* add cached SDE dependency graphs and character skill planning ([#44](https://github.com/HammoTime/eve-online-mcp/issues/44)) ([3c37d8a](https://github.com/HammoTime/eve-online-mcp/commit/3c37d8a4387b7d6313d54ea995a3321f4b10b895))
+
 ## [0.4.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.3.2...v0.4.0) (2026-09-07)
 
 
