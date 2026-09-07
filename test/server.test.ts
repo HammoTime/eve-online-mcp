@@ -6,13 +6,19 @@ import { EsiClient } from "../src/esi-client.js";
 import { OperationCatalog } from "../src/openapi.js";
 import { createEveServer } from "../src/server.js";
 import { fixtureDocument } from "./fixtures.js";
+import { fixtureSource } from "./skill-fixtures.js";
+import type { StaticDataSource } from "../src/static-data.js";
+import type { OpenApiDocument } from "../src/types.js";
 
 const connections: { close(): Promise<void> }[] = [];
 afterEach(async () =>
   Promise.all(connections.splice(0).map(async (value) => value.close())),
 );
 
-async function connectedClient(esiOverride?: EsiClient) {
+async function connectedClient(
+  esiOverride?: EsiClient,
+  staticData: StaticDataSource = fixtureSource(),
+) {
   const catalog = new OperationCatalog(fixtureDocument());
   const esiClient = new EsiClient(catalog, new StaticTokenProvider(undefined), {
     baseUrl: "http://localhost",
@@ -44,7 +50,12 @@ async function connectedClient(esiOverride?: EsiClient) {
         );
       }),
   });
-  const server = createEveServer(catalog, esiOverride ?? esiClient);
+  const server = createEveServer(
+    catalog,
+    esiOverride ?? esiClient,
+    undefined,
+    staticData,
+  );
   const client = new Client({ name: "test-client", version: "1.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -148,6 +159,10 @@ describe("EVE MCP server", () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
+      "initialize_static_data",
+      "resolve_skill_plan_targets",
+      "get_skill_dependencies",
+      "generate_skill_plan",
       "list_eve_characters",
       "authorize_eve_character",
       "select_eve_character",
@@ -429,5 +444,200 @@ describe("EVE MCP server", () => {
       arguments: { regionId: 1, typeId: 34, surprise: true },
     });
     expect(unknownField.isError).toBe(true);
+  });
+
+  it("serves the public cache and dependency graph through MCP without SSO", async () => {
+    const client = await connectedClient();
+    const cache = await client.callTool({
+      name: "initialize_static_data",
+      arguments: { refresh: true },
+    });
+    expect(cache.structuredContent).toMatchObject({
+      buildNumber: 123,
+      stale: false,
+    });
+    const targets = await client.callTool({
+      name: "resolve_skill_plan_targets",
+      arguments: { targets: ["exhumer", "Mining II"] },
+    });
+    expect(targets.structuredContent).toMatchObject({
+      targets: [
+        { status: "resolved", typeId: 200 },
+        { status: "resolved", typeId: 100 },
+      ],
+    });
+    const dependencies = await client.callTool({
+      name: "get_skill_dependencies",
+      arguments: { target: "Test Hull" },
+    });
+    expect(dependencies.structuredContent).toMatchObject({
+      status: "complete",
+      graph: { nodes: expect.any(Array), edges: expect.any(Array) },
+    });
+    const unknown = await client.callTool({
+      name: "generate_skill_plan",
+      arguments: { characterId: 42, target: "unknown" },
+    });
+    expect(unknown.structuredContent).toMatchObject({
+      status: "needs_target_selection",
+    });
+    expect(unknown.isError).not.toBe(true);
+  });
+
+  it("generates personalized training through MCP with actual ESI validation and authorization", async () => {
+    const catalog = new OperationCatalog(
+      JSON.parse(
+        readFileSync(
+          new URL("../openapi/esi-openapi.json", import.meta.url),
+          "utf8",
+        ),
+      ) as OpenApiDocument,
+    );
+    const tokenProvider = new StaticTokenProvider(
+      `h.${Buffer.from(JSON.stringify({ sub: "CHARACTER:EVE:42", scp: ["esi-skills.read_skills.v1", "esi-skills.read_skillqueue.v1"] })).toString("base64url")}.s`,
+    );
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((url) => {
+      const href =
+        url instanceof URL ? url.href : typeof url === "string" ? url : url.url;
+      if (href.includes("/skills"))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              skills: [
+                {
+                  skill_id: 100,
+                  trained_skill_level: 1,
+                  active_skill_level: 1,
+                  skillpoints_in_skill: 250,
+                },
+              ],
+              total_sp: 250,
+            }),
+          ),
+        );
+      if (href.includes("/skillqueue"))
+        return Promise.resolve(new Response("[]"));
+      throw new Error("Unexpected URL");
+    });
+    const esi = new EsiClient(catalog, tokenProvider, {
+      fetchImplementation: fetcher,
+    });
+    const client = await connectedClient(esi);
+    const result = await client.callTool({
+      name: "generate_skill_plan",
+      arguments: { characterId: 42, target: "Mining II" },
+    });
+    expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(
+      true,
+    );
+    expect(result.structuredContent).toMatchObject({
+      status: "complete",
+      trainingText: "Mining II",
+      additionalSkillPointsEstimate: 1165,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports cache failure consistently across all planning tools", async () => {
+    const source = fixtureSource();
+    vi.spyOn(source, "initialize").mockRejectedValue(
+      new Error("Static data unavailable"),
+    );
+    const client = await connectedClient(undefined, source);
+    for (const name of [
+      "initialize_static_data",
+      "resolve_skill_plan_targets",
+      "get_skill_dependencies",
+      "generate_skill_plan",
+    ]) {
+      const result = await client.callTool({
+        name,
+        arguments:
+          name === "initialize_static_data"
+            ? {}
+            : name === "generate_skill_plan"
+              ? { characterId: 42, target: "Mining II" }
+              : { target: "Mining II" },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.content)).toContain(
+        "Static data unavailable",
+      );
+    }
+  });
+
+  it.each([
+    [42, ["esi-skills.read_skills.v1"], "MISSING_SCOPES"],
+    [
+      43,
+      ["esi-skills.read_skills.v1", "esi-skills.read_skillqueue.v1"],
+      "CHARACTER_MISMATCH",
+    ],
+  ])(
+    "requires both private scopes and the intended character before ESI access: %j",
+    async (id, scopes, code) => {
+      const catalog = new OperationCatalog(fixtureDocument());
+      const fetcher = vi.fn<typeof fetch>();
+      const token = new StaticTokenProvider(
+        `h.${Buffer.from(JSON.stringify({ sub: `CHARACTER:EVE:${id}`, scp: scopes })).toString("base64url")}.s`,
+      );
+      const client = await connectedClient(
+        new EsiClient(catalog, token, { fetchImplementation: fetcher }),
+      );
+      const result = await client.callTool({
+        name: "generate_skill_plan",
+        arguments: { characterId: 42, target: "Mining II" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({ code });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {},
+    { target: "Mining", targets: ["Mining"] },
+    { target: "" },
+    { targets: [] },
+    { target: { typeId: 100, level: 6 } },
+    { target: "Mining", surprise: true },
+    { targets: Array.from({ length: 51 }, () => "Mining") },
+  ])("rejects invalid planning targets over MCP: %j", async (arguments_) => {
+    const client = await connectedClient();
+    for (const name of [
+      "resolve_skill_plan_targets",
+      "get_skill_dependencies",
+      "generate_skill_plan",
+    ]) {
+      expect(
+        (
+          await client.callTool({
+            name,
+            arguments:
+              name === "generate_skill_plan"
+                ? { ...arguments_, characterId: 42 }
+                : arguments_,
+          })
+        ).isError,
+      ).toBe(true);
+    }
+  });
+
+  it("requires an explicit character and valid queue policy for a personalized plan", async () => {
+    const client = await connectedClient();
+    for (const arguments_ of [
+      { target: "Mining II" },
+      { characterId: 0, target: "Mining II" },
+      { characterId: 42, target: "Mining II", queuePolicy: "discard" },
+    ]) {
+      expect(
+        (
+          await client.callTool({
+            name: "generate_skill_plan",
+            arguments: arguments_,
+          })
+        ).isError,
+      ).toBe(true);
+    }
   });
 });

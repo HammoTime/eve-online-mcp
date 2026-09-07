@@ -8,6 +8,24 @@ import {
 import type { OpenApiDocument } from "../src/types.js";
 
 describe("skill-plan prompt guidance", () => {
+  it("delegates prerequisites and arithmetic to tools while preserving vague-goal interpretation", () => {
+    const prompt = renderSkillPlanGuidance({
+      character: "42",
+      goal: "I want to fly Jump Freighters",
+    });
+    for (const tool of [
+      "initialize_static_data",
+      "resolve_skill_plan_targets",
+      "get_skill_dependencies",
+      "generate_skill_plan",
+    ])
+      expect(prompt).toContain(tool);
+    expect(prompt).toContain("actual racial hull");
+    expect(prompt).toContain("Do not reproduce any of these calculations");
+    expect(prompt).toContain("do not emit an importable list");
+    expect(prompt).toContain("trainingText unchanged");
+    expect(prompt).toContain("time is not calculated");
+  });
   it("preserves caller text as JSON data without changing fixed workflow guidance", () => {
     const request = {
       character: 'Pilot "Example"',
