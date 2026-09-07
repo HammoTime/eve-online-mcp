@@ -11,7 +11,7 @@ beforeAll(async () => {
 });
 
 function jwt(scopes: string[]): string {
-  return `h.${Buffer.from(JSON.stringify({ scp: scopes })).toString("base64url")}.s`;
+  return `h.${Buffer.from(JSON.stringify({ sub: "CHARACTER:EVE:42", scp: scopes })).toString("base64url")}.s`;
 }
 
 function clientWith(
@@ -67,7 +67,10 @@ describe("character context", () => {
     );
     expect(result.status).toBe("complete");
     expect(provider.getAccessToken).toHaveBeenCalledOnce();
-    expect(provider.getAccessToken).toHaveBeenCalledWith([...scopes].sort());
+    expect(provider.getAccessToken).toHaveBeenCalledWith(
+      [...scopes].sort(),
+      42,
+    );
     expect(fetchImplementation).toHaveBeenCalledTimes(3);
   });
 

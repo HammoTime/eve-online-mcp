@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { tokenProviderFromEnvironment } from "./auth.js";
+import {
+  DEFAULT_EVE_CLIENT_ID,
+  InteractiveSsoTokenProvider,
+  tokenProviderFromEnvironment,
+} from "./auth.js";
+import { CharacterAuthentication } from "./character-authentication.js";
+import { CredentialStore } from "./credential-store.js";
 import { runAuthCommand } from "./cli.js";
 import { EsiClient } from "./esi-client.js";
 import { loadOpenApiDocument, OperationCatalog } from "./openapi.js";
@@ -27,7 +33,25 @@ const client = new EsiClient(catalog, tokenProvider, {
     : {}),
 });
 
-serveStdio(() => createEveServer(catalog, client), {
+const store = new CredentialStore();
+const interactive =
+  tokenProvider instanceof InteractiveSsoTokenProvider
+    ? tokenProvider
+    : process.env.EVE_ACCESS_TOKEN ||
+        (process.env.EVE_CLIENT_ID && process.env.EVE_REFRESH_TOKEN)
+      ? undefined
+      : new InteractiveSsoTokenProvider(
+          store,
+          process.env.EVE_CLIENT_ID ?? DEFAULT_EVE_CLIENT_ID,
+          scopes,
+          fetch,
+          undefined,
+          undefined,
+          process.env.EVE_SSO_REDIRECT_URI,
+        );
+const authentication = new CharacterAuthentication(store, interactive);
+
+serveStdio(() => createEveServer(catalog, client, authentication), {
   onerror: (error) => {
     console.error("eve-online-mcp:", error.message);
   },

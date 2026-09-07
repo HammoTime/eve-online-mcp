@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { missingTokenScopes, type TokenProvider } from "./auth.js";
+import {
+  AuthenticationError,
+  missingTokenScopes,
+  type TokenProvider,
+} from "./auth.js";
+import { characterIdFromToken } from "./token-identity.js";
 import { OperationCatalog, UnknownOperationError } from "./openapi.js";
 import { DEFAULT_ESI_USER_AGENT } from "./package-metadata.js";
 import type {
@@ -45,6 +50,8 @@ export type EsiErrorCode =
   | "AUTHENTICATION_REQUIRED"
   | "AUTHENTICATION_FAILED"
   | "MISSING_SCOPES"
+  | "CHARACTER_MISMATCH"
+  | "CHARACTER_SELECTION_REQUIRED"
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "THROTTLED"
@@ -131,9 +138,13 @@ function suggestedActionForCode(code: EsiErrorCode): string | null {
   switch (code) {
     case "AUTHENTICATION_REQUIRED":
     case "AUTHENTICATION_FAILED":
-      return "Run `eve-online-mcp auth login`, then retry the protected operation.";
+      return "Use authorize_eve_character for the requested character, complete browser consent, then retry the protected operation.";
+    case "CHARACTER_MISMATCH":
+      return "Use authorize_eve_character and select the requested character in EVE SSO, then retry.";
+    case "CHARACTER_SELECTION_REQUIRED":
+      return "Use list_eve_characters, then select_eve_character for the intended character.";
     case "MISSING_SCOPES":
-      return "Log in again with the required read-only scopes listed in details.";
+      return "Use authorize_eve_character to grant the required read-only scopes listed in details.";
     case "THROTTLED":
       return "Wait for retryAfterSeconds when provided before trying again.";
     case "NETWORK_ERROR":
@@ -393,21 +404,39 @@ export class EsiClient {
       );
   }
 
-  async authorize(requiredScopes: string[]): Promise<EsiAuthorization> {
+  async authorize(
+    requiredScopes: string[],
+    characterId?: number,
+  ): Promise<EsiAuthorization> {
+    if (
+      characterId !== undefined &&
+      (!Number.isSafeInteger(characterId) || characterId <= 0)
+    )
+      throw validationError("characterId must be a positive safe integer");
     const scopes = [...new Set(requiredScopes)].sort();
     if (scopes.length === 0) return { authorizationContext: "esi" };
     let token: string | undefined;
     try {
-      token = await this.tokenProvider.getAccessToken(scopes);
+      token = await this.tokenProvider.getAccessToken(scopes, characterId);
     } catch (error) {
       throw new EsiRequestError(
         error instanceof Error ? error.message : "EVE authentication failed",
-        401,
-        { requiredScopes: scopes },
-        { code: "AUTHENTICATION_FAILED", retryable: false },
+        error instanceof AuthenticationError ? 403 : 401,
+        {
+          requiredScopes: scopes,
+          ...(characterId === undefined ? {} : { characterId }),
+          ...(error instanceof AuthenticationError ? error.details : {}),
+        },
+        {
+          code:
+            error instanceof AuthenticationError
+              ? error.code
+              : "AUTHENTICATION_FAILED",
+          retryable: false,
+        },
       );
     }
-    const checkedToken = this.requireToken(token, scopes);
+    const checkedToken = this.requireToken(token, scopes, characterId);
     const authorization: EsiAuthorization = { authorizationContext: "esi" };
     this.authorizationTokens.set(authorization, checkedToken);
     return authorization;
@@ -442,7 +471,11 @@ export class EsiClient {
       headers.set("content-type", "application/json");
     }
 
-    const token = await this.tokenFor(operation, authorization);
+    const characterId =
+      typeof input.path?.character_id === "number"
+        ? input.path.character_id
+        : undefined;
+    const token = await this.tokenFor(operation, authorization, characterId);
     if (token) headers.set("authorization", `Bearer ${token}`);
     const cacheHeaders = [...headers.entries()].filter(
       ([name]) => name !== "authorization" && name !== "user-agent",
@@ -541,9 +574,17 @@ export class EsiClient {
     if (!response.ok && response.status !== 304) {
       const code = codeForStatus(response.status);
       throw new EsiRequestError(
-        `ESI ${operation.operationId} failed with HTTP ${response.status}`,
+        `ESI ${operation.operationId}${characterId === undefined ? "" : ` for character ${characterId}`} failed with HTTP ${response.status}`,
         response.status,
-        data ?? undefined,
+        response.status === 401 || response.status === 403
+          ? {
+              ...(characterId === undefined ? {} : { characterId }),
+              authenticatedCharacterId: token
+                ? (characterIdFromToken(token) ?? null)
+                : null,
+              requiredScopes: operation.requiredScopes,
+            }
+          : (data ?? undefined),
         {
           code,
           retryable: retryableForCode(code),
@@ -575,12 +616,16 @@ export class EsiClient {
   private requireToken(
     token: string | undefined,
     requiredScopes: string[],
+    characterId?: number,
   ): string {
     if (!token)
       throw new EsiRequestError(
         "This operation requires EVE authentication.",
         401,
-        { requiredScopes },
+        {
+          requiredScopes,
+          ...(characterId === undefined ? {} : { characterId }),
+        },
         { code: "AUTHENTICATION_REQUIRED", retryable: false },
       );
     const missingScopes = missingTokenScopes(token, requiredScopes);
@@ -588,8 +633,24 @@ export class EsiClient {
       throw new EsiRequestError(
         "The EVE access token lacks required scopes",
         403,
-        { missingScopes },
+        {
+          missingScopes,
+          ...(characterId === undefined ? {} : { characterId }),
+        },
         { code: "MISSING_SCOPES", retryable: false },
+      );
+    if (
+      characterId !== undefined &&
+      characterIdFromToken(token) !== characterId
+    )
+      throw new EsiRequestError(
+        `The EVE authorization does not belong to requested character ${characterId}.`,
+        403,
+        {
+          characterId,
+          authenticatedCharacterId: characterIdFromToken(token) ?? null,
+        },
+        { code: "CHARACTER_MISMATCH", retryable: false },
       );
     return token;
   }
@@ -597,6 +658,7 @@ export class EsiClient {
   private async tokenFor(
     operation: OperationDescriptor,
     authorization: EsiAuthorization | undefined,
+    characterId: number | undefined,
   ): Promise<string | undefined> {
     if (operation.requiredScopes.length === 0) return undefined;
     let token = authorization
@@ -608,17 +670,28 @@ export class EsiClient {
       try {
         token = await this.tokenProvider.getAccessToken(
           operation.requiredScopes,
+          characterId,
         );
       } catch (error) {
         throw new EsiRequestError(
           error instanceof Error ? error.message : "EVE authentication failed",
-          401,
-          { requiredScopes: operation.requiredScopes },
-          { code: "AUTHENTICATION_FAILED", retryable: false },
+          error instanceof AuthenticationError ? 403 : 401,
+          {
+            requiredScopes: operation.requiredScopes,
+            ...(characterId === undefined ? {} : { characterId }),
+            ...(error instanceof AuthenticationError ? error.details : {}),
+          },
+          {
+            code:
+              error instanceof AuthenticationError
+                ? error.code
+                : "AUTHENTICATION_FAILED",
+            retryable: false,
+          },
         );
       }
     }
-    return this.requireToken(token, operation.requiredScopes);
+    return this.requireToken(token, operation.requiredScopes, characterId);
   }
 
   private paginationFor(

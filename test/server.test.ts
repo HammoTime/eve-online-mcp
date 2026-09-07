@@ -87,9 +87,12 @@ describe("EVE MCP server", () => {
       expect(tool.title).toContain("EVE Online");
       expect(tool.description).toContain("EVE Online");
       expect(tool.annotations).toMatchObject({
-        readOnlyHint: true,
+        readOnlyHint: ![
+          "authorize_eve_character",
+          "select_eve_character",
+        ].includes(tool.name),
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: tool.name !== "authorize_eve_character",
       });
     }
     expect(fetchImplementation).not.toHaveBeenCalled();
@@ -132,6 +135,9 @@ describe("EVE MCP server", () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
+      "list_eve_characters",
+      "authorize_eve_character",
+      "select_eve_character",
       "search_esi_operations",
       "get_esi_operation",
       "call_esi",

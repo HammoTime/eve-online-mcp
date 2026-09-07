@@ -15,6 +15,7 @@ import { getMarketSnapshot } from "./market-snapshot.js";
 import { operationGuidance } from "./operation-metadata.js";
 import { searchOperationsDetailed } from "./operation-search.js";
 import { OperationCatalog, publicOperation } from "./openapi.js";
+import type { CharacterAuthentication } from "./character-authentication.js";
 
 const jsonRecord = z.record(z.string(), z.json()).optional();
 const positiveSafeInteger = z
@@ -58,10 +59,80 @@ function errorResult(error: unknown) {
 export function createEveServer(
   catalog: OperationCatalog,
   client: EsiClient,
+  authentication?: CharacterAuthentication,
 ): McpServer {
   const server = new McpServer(
     { name: "eve-online-mcp", version: "0.1.0" },
     { instructions: SERVER_INSTRUCTIONS },
+  );
+
+  const requireAuthentication = () => {
+    if (!authentication)
+      throw new Error(
+        "Character authentication management is not configured by this MCP host.",
+      );
+    return authentication;
+  };
+  server.registerTool(
+    "list_eve_characters",
+    {
+      title: "List authorized EVE Online characters",
+      description:
+        "List locally authorized EVE Online character IDs, names, granted scopes, and the default character. Contains no tokens. Public ESI data never needs login; a protected request for a missing character automatically opens EVE SSO. Use authorize_eve_character to renew consent or fix missing scopes.",
+      inputSchema: z.object({}),
+      annotations: { ...READ_ONLY_ANNOTATIONS, openWorldHint: false },
+    },
+    async () => {
+      try {
+        return textResult(await requireAuthentication().list());
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "authorize_eve_character",
+    {
+      title: "Authorize an EVE Online character",
+      description:
+        "Open EVE SSO for the requested EVE Online character and save its separate refresh credential after browser consent. Use when authorization is missing, expired, revoked, or lacks scopes. Tell the user to select this character in the browser; they never need commands or tokens. A different character selection is rejected without replacing saved credentials. Grants only the pinned read-only ESI scopes and does not change game state. Retry the protected request after success.",
+      inputSchema: z.object({ characterId: positiveSafeInteger }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ characterId }) => {
+      try {
+        return textResult(await requireAuthentication().authorize(characterId));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+  server.registerTool(
+    "select_eve_character",
+    {
+      title: "Select the default EVE Online character",
+      description:
+        "Choose an already authorized EVE Online character for protected operations without a character_id path parameter, such as corporation or structure requests. Character-specific operations always use their requested character. Changes only the local default, without changing game state or granting corporation roles.",
+      inputSchema: z.object({ characterId: positiveSafeInteger }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ characterId }) => {
+      try {
+        return textResult(await requireAuthentication().select(characterId));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
   );
 
   server.registerTool(
@@ -336,7 +407,7 @@ export function createEveServer(
                     "Collect a bounded public regional order snapshot and observed aggregates.",
                 },
                 access:
-                  "Public discovery and public operations never authenticate. Scoped character sections use EVE SSO.",
+                  "Public discovery and public operations never authenticate. Missing character credentials automatically open EVE SSO. Use list_eve_characters to inspect safe authorization metadata, authorize_eve_character to renew consent, and select_eve_character when a protected operation without a character path needs an explicit default. Never ask the user to handle tokens or run commands.",
                 freshness:
                   "Freshness records when each upstream response was fetched and served; completeness reports bounded multi-request coverage, not an atomic real-time observation.",
               },
