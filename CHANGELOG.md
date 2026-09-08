@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.5.0...v0.6.0) (2026-09-08)
+
+
+### Features
+
+* add contextual OpenTelemetry and offline diagnostic replay ([8bafd74](https://github.com/HammoTime/eve-online-mcp/commit/8bafd7491469323c911c6864945816f4e6fafde4))
+
 ## [0.5.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.4.0...v0.5.0) (2026-09-07)
 
 
