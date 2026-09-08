@@ -42,11 +42,9 @@ export function defaultStaticDataDirectory(
         : (env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
   return join(base, "eve-online-mcp", "sde");
 }
-export interface StaticDataSource {
-  initialize(
-    refresh?: boolean,
-  ): Promise<{ catalog: SkillCatalog; status: Record<string, unknown> }>;
-}
+import type { StaticDataSource } from "../lib/src/static-data.js";
+export type { StaticDataSource } from "../lib/src/static-data.js";
+
 interface CacheOptions {
   directory?: string;
   fetchImplementation?: typeof fetch;

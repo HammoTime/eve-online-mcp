@@ -13,7 +13,7 @@ For an authorized change, continue through implementation, validation, a Convent
 `eve-online-mcp` is a TypeScript MCP server that gives AI assistants safe, read-only access to the EVE Online ESI API. Preserve its core guarantees:
 
 - Expose every ESI `GET` and `HEAD` operation from the pinned OpenAPI document.
-- Expose a `POST` operation only when it has been manually verified to be semantically read-only and added to `SAFE_POST_OPERATION_IDS` in `src/openapi.ts`.
+- Expose a `POST` operation only when it has been manually verified to be semantically read-only and added to `SAFE_POST_OPERATION_IDS` in `lib/src/openapi.ts`.
 - Never expose ESI operations that change game state, send messages, alter UI state, or mutate character, corporation, fleet, fitting, contact, calendar, or mail data.
 - Never accept an arbitrary URL, HTTP method, Authorization header, or undeclared OpenAPI parameter from an MCP caller.
 - Keep public ESI operations credential-free. Authentication should occur only when an operation requires scopes.
@@ -33,13 +33,19 @@ Run repository commands inside that container. Keep `package-lock.json` synchron
 
 ## Architecture
 
+- `lib/` is the pinned `eve-online-mcp-lib` source submodule. Publish and validate
+  shared changes there before committing a new consumer submodule pointer. Run
+  `git submodule update --init --recursive` before container dependency setup.
+- Keep shared runtime source independent of Node globals, local storage and
+  Cloudflare bindings; consumers provide transport, auth and static-data adapters.
+
 - `src/index.ts` is the stdio and CLI entry point.
-- `src/server.ts` defines MCP tools, resources, and prompts.
-- `src/openapi.ts` loads the pinned schema, builds the operation catalog, and enforces the read-only operation allowlist.
-- `src/esi-client.ts` validates parameters, constructs fixed-origin ESI requests, handles caching and response limits, and returns useful response metadata.
+- `src/server.ts` supplies local adapters to the shared MCP server in `lib/src/server.ts`.
+- `lib/src/openapi.ts` loads the pinned schema, builds the operation catalog, and enforces the read-only operation allowlist.
+- `lib/src/esi-client.ts` validates ESI requests, handles credential-sensitive caching and response limits; `src/esi-client.ts` supplies local package metadata.
 - `src/auth.ts`, `src/sso.ts`, and `src/credential-store.ts` implement PKCE login, token refresh, token rotation, and local credential persistence.
 - `src/schema-diff.ts` and `scripts/` implement deterministic schema updates and monitoring.
-- `openapi/esi-openapi.json` is the canonical, pinned upstream schema used at runtime.
+- `lib/openapi/esi-openapi.json` is the canonical, pinned upstream schema used at runtime.
 
 Prefer small, testable modules and dependency injection for network, filesystem, browser, and time-dependent behavior. Do not write protocol messages or diagnostics to stdout while the MCP stdio server is running; stdout is reserved for MCP. Authentication diagnostics must use stderr.
 

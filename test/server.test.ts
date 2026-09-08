@@ -488,7 +488,7 @@ describe("EVE MCP server", () => {
     const catalog = new OperationCatalog(
       JSON.parse(
         readFileSync(
-          new URL("../openapi/esi-openapi.json", import.meta.url),
+          new URL("../lib/openapi/esi-openapi.json", import.meta.url),
           "utf8",
         ),
       ) as OpenApiDocument,

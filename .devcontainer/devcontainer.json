@@ -16,5 +16,5 @@
       "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
     }
   },
-  "postCreateCommand": "npm ci"
+  "postCreateCommand": "git submodule update --init --recursive && npm ci"
 }

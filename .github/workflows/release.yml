@@ -53,6 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          submodules: recursive
           fetch-depth: 0
           ref: main
       - uses: actions/setup-node@v7
@@ -141,6 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          submodules: recursive
           ref: ${{ needs.publish-plan.outputs.tag_name }}
       - name: Require release tag to match package version
         env:

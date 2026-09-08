@@ -22,12 +22,11 @@
   },
   "files": [
     "dist",
-    "openapi/esi-openapi.json",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "build": "npm run clean && tsc -p tsconfig.build.json && tsx scripts/build-assets.ts",
     "clean": "node --eval \"import('node:fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
     "dev": "tsx src/index.ts",
     "format": "prettier --write .",
@@ -41,7 +40,8 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run typecheck:lib && npm test && npm run build",
+    "typecheck:lib": "tsc -p lib/tsconfig.runtime.json --noEmit"
   },
   "engines": {
     "node": ">=22"
