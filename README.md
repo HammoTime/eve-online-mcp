@@ -63,6 +63,21 @@ For a local checkout, build in the devcontainer and use `node /absolute/path/to/
 
 During MCP initialization, the server reports the version from its installed `package.json`, so MCP host diagnostics identify the running package release.
 
+Optional OpenTelemetry exports traces, correlated logs and delta metrics. Set
+`OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP HTTP base endpoint and
+`OTEL_EXPORTER_OTLP_HEADERS` to a JSON object of ingestion headers. Both values
+belong in the MCP host's private environment. The endpoint is HTTPS, with HTTP
+allowed only for a localhost collector. Omit it to disable telemetry.
+
+Reviewed public inputs, effective limits, decisions and output counts provide
+context without credentials or private character data. MCP result metadata includes
+`eve/trace-id`. Diagnostic files default to `~/.eve-online-mcp/diagnostics`; override
+with `EVE_DIAGNOSTICS_DIR`. `OTEL_DEPLOYMENT_ENVIRONMENT` defaults to `local`.
+Shutdown flushes on EOF, SIGINT and SIGTERM; stdout remains reserved for JSON-RPC.
+See the [capture and offline replay runbook](lib/docs/diagnostics.md). Replay/export
+commands run from a source checkout and its devcontainer. Dirty or unversioned
+builds explicitly produce partial captures.
+
 ### Discovery in Codex and other MCP hosts
 
 Installing the npm package makes the executable available; the MCP host must also be configured to launch it. For [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), register the stdio server with:
