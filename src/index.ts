@@ -12,6 +12,7 @@ import { EsiClient } from "./esi-client.js";
 import { loadOpenApiDocument, OperationCatalog } from "./openapi.js";
 import { createEveServer } from "./server.js";
 import { StaticDataCache } from "./static-data.js";
+import { localTelemetry } from "./telemetry.js";
 
 const document = await loadOpenApiDocument();
 const catalog = new OperationCatalog(document);
@@ -59,8 +60,25 @@ void staticData.initialize().catch(() => {
   );
 });
 
-serveStdio(() => createEveServer(catalog, client, authentication, staticData), {
-  onerror: (error) => {
-    console.error("eve-online-mcp:", error.message);
-  },
+const telemetry = await localTelemetry();
+const factory = () =>
+  createEveServer(catalog, client, authentication, staticData);
+const start = () =>
+  serveStdio(() => (telemetry ? telemetry.run(factory) : factory()), {
+    onerror: () => {
+      console.error("eve-online-mcp: MCP transport error");
+    },
+  });
+const handle = telemetry ? telemetry.run(start) : start();
+let closing: Promise<void> | undefined;
+const close = () =>
+  (closing ??= handle.close().finally(() => telemetry?.close()));
+process.stdin.once("end", () => {
+  void close();
 });
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.once(signal, () => {
+    void close().finally(() => {
+      process.exit(0);
+    });
+  });

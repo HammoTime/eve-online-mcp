@@ -40,8 +40,11 @@
     "test": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run typecheck:lib && npm test && npm run build",
-    "typecheck:lib": "tsc -p lib/tsconfig.runtime.json --noEmit"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run typecheck:lib && npm test && npm run build && npm run smoke:telemetry",
+    "smoke:telemetry": "tsx scripts/smoke-telemetry.ts",
+    "typecheck:lib": "tsc -p lib/tsconfig.runtime.json --noEmit",
+    "diagnostics:export": "tsx lib/adapters/diagnostics-cli.ts export",
+    "diagnostics:replay": "tsx lib/adapters/diagnostics-cli.ts replay"
   },
   "engines": {
     "node": ">=22"
@@ -52,6 +55,14 @@
   "license": "AGPL-3.0-only",
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/context-async-hooks": "^2.11.0",
+    "@opentelemetry/core": "^2.11.0",
+    "@opentelemetry/otlp-transformer": "^0.219.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-logs": "^0.219.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
     "jose": "^6.2.12",
     "open": "^11.0.2",
     "yauzl": "^3.4.0",
