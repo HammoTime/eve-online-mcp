@@ -273,7 +273,9 @@ The future hosted application will supply its own user-session auth and D1
 static-data adapter, with the requested four-hour ETag check. This extraction
 does not create or deploy that service.
 
-[`esi-schema-monitor.yml`](.github/workflows/esi-schema-monitor.yml) runs daily and on demand. It downloads CCP's current schema, canonicalizes it, compares SHA-256 hashes and operation definitions, and creates one deduplicated GitHub issue describing added, removed, and modified routes. Further detections comment on the open issue rather than creating noise.
+[`esi-schema-monitor.yml`](.github/workflows/esi-schema-monitor.yml) remains in **eve-online-mcp**, not the library repository. It runs daily at **07:23 UTC** and on demand. It checks out this application's pinned `lib` revision, downloads CCP's current schema, canonicalizes both documents, and compares SHA-256 hashes and operation definitions. It does not automatically replace the schema or approve new operations.
+
+When a difference is detected, the workflow automatically files **ESI OpenAPI schema update required** in **HammoTime/eve-online-mcp**, with the hashes and added, removed, and modified routes. An existing open issue is updated with the latest diff; an identical repeat leaves it unchanged, without duplicate issues or comments. The issue lookup checks every page directly rather than relying on search indexing. Matching schemas do not create an issue. Forks do not run this monitor against the upstream repository.
 
 After reviewing an update:
 
