@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Build development container
         run: docker build --target development -f .devcontainer/Dockerfile -t eve-online-mcp-dev .
       - name: Compare pinned schema with ESI

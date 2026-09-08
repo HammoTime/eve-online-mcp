@@ -250,6 +250,29 @@ Market snapshots cover the public regional orders endpoint only. `locationId` is
 
 ## Schema monitoring
 
+The shared runtime and pinned schema live in the public
+[`eve-online-mcp-lib`](https://github.com/HammoTime/eve-online-mcp-lib) Git
+submodule at `lib/`. Clone this repository with `git clone --recurse-submodules`,
+or run `git submodule update --init --recursive` in an existing checkout before
+installing dependencies. The devcontainer and CI initialize the submodule.
+
+The library owns ESI validation and caching, token refresh and verification,
+MCP tool/resource/prompt registration, static-data parsing, and skill planning.
+This application supplies stdio transport, browser PKCE login, local credential
+and SDE files, and package metadata. Its small `src/` forwarding modules preserve
+the existing local integration points. The build compiles the pinned library
+into `dist/` with the schema; npm installs need neither Git nor a library checkout.
+
+To update shared code, commit and push the library change first, then commit the
+new `lib` submodule pointer here. Run the library's `npm run validate` in its own
+devcontainer and this application's `npm run validate` and `npm pack --dry-run`
+in the application devcontainer. Application tests include the pinned library
+suite and local auth, credential, archive, and MCP integration coverage.
+
+The future hosted application will supply its own user-session auth and D1
+static-data adapter, with the requested four-hour ETag check. This extraction
+does not create or deploy that service.
+
 [`esi-schema-monitor.yml`](.github/workflows/esi-schema-monitor.yml) runs daily and on demand. It downloads CCP's current schema, canonicalizes it, compares SHA-256 hashes and operation definitions, and creates one deduplicated GitHub issue describing added, removed, and modified routes. Further detections comment on the open issue rather than creating noise.
 
 After reviewing an update:
@@ -259,7 +282,11 @@ npm run schema:update
 npm run validate
 ```
 
-Review any new non-GET operation manually. Read-only `POST` routes are deliberately allowlisted in `src/openapi.ts`; a new route is not exposed until its semantics are verified.
+Review any new non-GET operation manually. Read-only `POST` routes are deliberately allowlisted in `lib/src/openapi.ts`; a new route is not exposed until its semantics are verified.
+
+`schema:update` changes `lib/openapi/esi-openapi.json`. Review and publish that
+library commit before advancing this application's submodule pointer; do not
+leave the schema only in a modified or detached submodule checkout.
 
 ## Publishing to npm and GitHub Packages
 
