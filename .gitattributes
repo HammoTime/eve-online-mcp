@@ -1,0 +1,2 @@
+# Source is built and tested in a Linux devcontainer, including Windows checkouts.
+* text=auto eol=lf

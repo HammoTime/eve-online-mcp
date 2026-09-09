@@ -114,9 +114,12 @@ describe("EVE MCP server", () => {
         readOnlyHint: ![
           "authorize_eve_character",
           "select_eve_character",
+          "render_eve_map",
         ].includes(tool.name),
         destructiveHint: false,
-        idempotentHint: tool.name !== "authorize_eve_character",
+        idempotentHint: !["authorize_eve_character", "render_eve_map"].includes(
+          tool.name,
+        ),
       });
     }
     expect(fetchImplementation).not.toHaveBeenCalled();
@@ -172,6 +175,7 @@ describe("EVE MCP server", () => {
       "resolve_eve_entities",
       "get_character_context",
       "get_market_snapshot",
+      "render_eve_map",
     ]);
 
     const search = await client.callTool({
