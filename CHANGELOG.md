@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.6.0...v0.7.0) (2026-09-09)
+
+
+### Features
+
+* integrate SVG map rendering with PNG previews ([#50](https://github.com/HammoTime/eve-online-mcp/issues/50)) ([234d260](https://github.com/HammoTime/eve-online-mcp/commit/234d2603aef303f12211d1a109183a238fe416b4))
+
 ## [0.6.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.5.0...v0.6.0) (2026-09-08)
 
 
