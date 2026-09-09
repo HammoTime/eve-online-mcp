@@ -18,6 +18,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `resolve_skill_plan_targets` resolves exact skill/ship names or type IDs against the cache, including explicit skill levels and unique singular skill names. Ambiguous or unresolved inputs return candidates.
 - `get_skill_dependencies` returns a public prerequisite graph with skill-level nodes and prerequisite-to-dependent edges, without login.
 - `generate_skill_plan` computes a personalized, dependency-checked plan from cached requirements and scoped character skills/queue, removes completed levels, and returns training text and estimated remaining SP.
+- `render_eve_map` renders an existing plan as an SVG with an explicit map boundary, a numbered points-of-interest list and optional supplied routes. It never creates plans, chooses destinations or calculates routes. The local app stores private generated artifacts and optionally returns a PNG preview for inline-capable hosts; SVG originals are available through MCP resource reads. See [cartography](docs/cartography.md).
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
 - `plan_eve_skills` interprets activity/class goals, resolves material choices, and calls the deterministic planning tools. It explains practical support, optional upgrades and eligibility limits.
@@ -200,6 +201,33 @@ Optional settings:
 Do not commit tokens or client secrets. Tool responses never include the token, and callers cannot override the ESI origin or inject arbitrary headers.
 
 ## Suggested usage
+
+### Visualize an existing plan
+
+Give `render_eve_map` a required `boundary` and `pointsOfInterest` list (use `[]`
+for none), plus optional already-ordered `routes`. Boundaries can name systems,
+a region, a constellation, or an absolute X/Z extent in light years. References
+are exact names or numeric IDs. The renderer reads public cached SDE geography,
+not character data or a route-planning endpoint. It validates supplied connections
+without repairing, expanding or replanning them.
+
+```json
+{
+  "boundary": { "kind": "constellation", "constellation": "Kimotoro" },
+  "pointsOfInterest": [
+    { "system": "Jita", "kind": "staging", "label": "Departure" }
+  ],
+  "routes": [{ "systems": ["Jita", "Maurasi"] }],
+  "theme": "dark"
+}
+```
+
+This is an illustration, not a safety recommendation. SVG is the primary artifact;
+PNG preview and actual inline display depend on rasterizer/host support. The
+`eve-map://` resource URI is read through MCP, not opened as a public website.
+Generated files expire after seven days or earlier storage eviction. Configure
+their directory with `EVE_MAP_ARTIFACT_DIR`. The tool writes these local artifacts
+but never changes game state. See the [interface, limits and development examples](docs/cartography.md).
 
 ### Character skill training plans
 
