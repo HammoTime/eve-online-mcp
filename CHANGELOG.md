@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.7.0...v0.8.0) (2026-09-11)
+
+
+### Features
+
+* uplift local MCP calls with SQLite storage (Node 22.13+) ([#53](https://github.com/HammoTime/eve-online-mcp/issues/53)) ([55325af](https://github.com/HammoTime/eve-online-mcp/commit/55325af589e2de4c80233b1bdfdd3ec252788494))
+
 ## [0.7.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.6.0...v0.7.0) (2026-09-09)
 
 
