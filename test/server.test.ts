@@ -1,23 +1,45 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StaticTokenProvider } from "../src/auth.js";
+import {
+  InteractiveSsoTokenProvider,
+  StaticTokenProvider,
+} from "../src/auth.js";
+import { CharacterAuthentication } from "../src/character-authentication.js";
+import { CredentialStore } from "../src/credential-store.js";
 import { EsiClient } from "../src/esi-client.js";
 import { OperationCatalog } from "../src/openapi.js";
 import { createEveServer } from "../src/server.js";
 import { fixtureDocument } from "./fixtures.js";
-import { fixtureSource } from "./skill-fixtures.js";
-import type { StaticDataSource } from "../src/static-data.js";
+import { fixtureSource, skillFixture } from "./skill-fixtures.js";
+import { StaticDataCache, type StaticDataSource } from "../src/static-data.js";
+import type { readStaticArchive } from "../src/static-data-archive.js";
 import type { OpenApiDocument } from "../src/types.js";
+import type { SsoLoginOptions } from "../src/sso.js";
+import {
+  testCredential,
+  testVerifier,
+  trainingScopes,
+} from "./auth-fixtures.js";
 
 const connections: { close(): Promise<void> }[] = [];
-afterEach(async () =>
-  Promise.all(connections.splice(0).map(async (value) => value.close())),
-);
+const directories: string[] = [];
+afterEach(async () => {
+  await Promise.all(connections.splice(0).map(async (value) => value.close()));
+  await Promise.all(
+    directories
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
 
 async function connectedClient(
   esiOverride?: EsiClient,
   staticData: StaticDataSource = fixtureSource(),
+  authentication?: CharacterAuthentication,
 ) {
   const catalog = new OperationCatalog(fixtureDocument());
   const esiClient = new EsiClient(catalog, new StaticTokenProvider(undefined), {
@@ -53,7 +75,7 @@ async function connectedClient(
   const server = createEveServer(
     catalog,
     esiOverride ?? esiClient,
-    undefined,
+    authentication,
     staticData,
   );
   const client = new Client({ name: "test-client", version: "1.0.0" });
@@ -177,6 +199,13 @@ describe("EVE MCP server", () => {
       "get_market_snapshot",
       "render_eve_map",
     ]);
+    expect(tools.filter((tool) => tool.name !== "render_eve_map")).toHaveLength(
+      13,
+    );
+    expect(tools).toHaveLength(14);
+    for (const tool of tools) {
+      expect(tool.outputSchema, tool.name).toMatchObject({ type: "object" });
+    }
 
     const search = await client.callTool({
       name: "search_esi_operations",
@@ -201,6 +230,10 @@ describe("EVE MCP server", () => {
       freshness: { fetchedAt: expect.any(String) },
       pagination: { mode: "none" },
     });
+    expect(call.structuredContent).not.toHaveProperty("result");
+    const callText = call.content.find((block) => block.type === "text");
+    if (callText?.type !== "text") throw new Error("Expected ESI result text");
+    expect(JSON.parse(callText.text)).toEqual(call.structuredContent);
     const badDetail = await client.callTool({
       name: "get_esi_operation",
       arguments: { operationId: "DeleteEverything" },
@@ -258,6 +291,124 @@ describe("EVE MCP server", () => {
     });
     expect(allFailed.isError).toBe(true);
     expect(allFailed.structuredContent).toMatchObject({ status: "failed" });
+  });
+
+  it("preserves unwrapped local authorization metadata through the advertised output schemas", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "eve-server-auth-"));
+    directories.push(directory);
+    const store = new CredentialStore(join(directory, "credentials.json"));
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const login = vi.fn(async (options: SsoLoginOptions) => {
+      await store.write(testCredential(options.expectedCharacterId));
+    });
+    const provider = new InteractiveSsoTokenProvider(
+      store,
+      "test-client",
+      trainingScopes,
+      fetchImplementation,
+      login,
+      testVerifier,
+    );
+    const catalog = new OperationCatalog(fixtureDocument());
+    const client = await connectedClient(
+      new EsiClient(catalog, provider, { fetchImplementation }),
+      fixtureSource(),
+      new CharacterAuthentication(store, provider),
+    );
+    await client.listTools();
+    for (const name of [
+      "list_eve_characters",
+      "authorize_eve_character",
+      "select_eve_character",
+    ]) {
+      const result = await client.callTool({
+        name,
+        arguments: name === "list_eve_characters" ? {} : { characterId: 42 },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent).toEqual({
+        characters:
+          name === "list_eve_characters"
+            ? []
+            : [
+                {
+                  characterId: 42,
+                  characterName: "Test Pilot 42",
+                  scopes: trainingScopes,
+                },
+              ],
+        defaultCharacterId: name === "select_eve_character" ? 42 : null,
+        legacyCredentialPendingMigration: false,
+        browserAuthorizationAvailable: true,
+      });
+      expect(result.structuredContent).not.toHaveProperty("result");
+      const text = result.content.find((block) => block.type === "text");
+      if (text?.type !== "text") throw new Error("Expected auth result text");
+      expect(JSON.parse(text.text)).toEqual(result.structuredContent);
+      expect(JSON.stringify(result)).not.toMatch(
+        /refreshToken|accessToken|fake-refresh|test-client/u,
+      );
+    }
+    expect(login).toHaveBeenCalledOnce();
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
+  it("preserves the actual SQLite-backed local cache status fields through MCP after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "eve-server-status-"));
+    directories.push(directory);
+    const data = skillFixture();
+    const checkedAt = new Date(data.fetchedAt).toISOString();
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            _key: "sde",
+            buildNumber: data.buildNumber,
+            releaseDate: data.releaseDate,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response("synthetic archive"));
+    const readArchive = vi.fn<typeof readStaticArchive>((_path, metadata) =>
+      Promise.resolve({ ...data, ...metadata }),
+    );
+    const options = {
+      directory,
+      fetchImplementation,
+      readArchive,
+      now: () => Date.parse(checkedAt),
+    };
+    await new StaticDataCache(options).initialize();
+    fetchImplementation.mockClear();
+    readArchive.mockClear();
+    const client = await connectedClient(
+      undefined,
+      new StaticDataCache(options),
+    );
+    await client.listTools();
+    const result = await client.callTool({
+      name: "initialize_static_data",
+      arguments: {},
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      buildNumber: data.buildNumber,
+      releaseDate: data.releaseDate,
+      sourceUrl: data.sourceUrl,
+      fetchedAt: checkedAt,
+      checkedAt,
+      stale: false,
+      cacheDirectory: directory,
+      typeCount: 4,
+      skillCount: 3,
+    });
+    expect(result.structuredContent).not.toHaveProperty("result");
+    const text = result.content.find((block) => block.type === "text");
+    if (text?.type !== "text") throw new Error("Expected cache status text");
+    expect(JSON.parse(text.text)).toEqual(result.structuredContent);
+    expect(fetchImplementation).not.toHaveBeenCalled();
+    expect(readArchive).not.toHaveBeenCalled();
   });
 
   it("exposes catalog context and an adventure-planning prompt", async () => {

@@ -7,7 +7,8 @@ reorders visits, recommends activities or changes game state. It does not call
 ESI or authenticate an EVE character. It reads cached public CCP SDE geography.
 
 This supersedes the earlier proposed `generate_eve_map` interface: there are no
-`from`, `to`, `via`, `avoid`, `preference` or neighbourhood-expansion arguments.
+`from`, `to`, `via`, `avoid` or `preference` arguments. The explicit `neighborhood`
+boundary selects one permanent-stargate hop; it is not a route planner.
 
 ## Input
 
@@ -48,18 +49,23 @@ checked against SDE builds 3498825 and 3500372 during development, not against l
 
 ### Boundary variants
 
-| Kind            | Additional fields                 | Meaning                                        |
-| --------------- | --------------------------------- | ---------------------------------------------- |
-| `systems`       | `systems: (string \| number)[]`   | Exactly these systems; no automatic neighbours |
-| `region`        | `region: string \| number`        | All SDE systems in this region                 |
-| `constellation` | `constellation: string \| number` | All SDE systems in this constellation          |
-| `extent`        | `minX`, `maxX`, `minZ`, `maxZ`    | Inclusive absolute X/Z bounds, in light years  |
+| Kind            | Additional fields                       | Meaning                                                                |
+| --------------- | --------------------------------------- | ---------------------------------------------------------------------- |
+| `systems`       | `systems: (string \| number)[]`         | Exactly these systems; no automatic neighbours                         |
+| `neighborhood`  | `center: string \| number`, `jumps?: 1` | Center plus all incoming/outgoing one-hop permanent-stargate neighbors |
+| `region`        | `region: string \| number`              | All SDE systems in this region                                         |
+| `constellation` | `constellation: string \| number`       | All SDE systems in this constellation                                  |
+| `extent`        | `minX`, `maxX`, `minZ`, `maxZ`          | Inclusive absolute X/Z bounds, in light years                          |
 
 Extents require strictly increasing bounds and force geographic layout. +X is
 right, +Z is up, and the Y coordinate is omitted. The viewport remains the supplied
 extent; it is not refitted around points of interest. This is not a jump-range
 calculation. A rounded visual frame marks the map panel; it is **not** a territorial
 or sovereignty boundary.
+
+For example, `{"boundary":{"kind":"neighborhood","center":"Jita","jumps":1},"pointsOfInterest":[]}`
+needs one map call and no ESI lookup calls. `jumps` defaults to 1; other depths are
+rejected. Incoming-only links are included without inventing reverse route hops.
 
 POIs and every route visit must fall inside the explicit boundary. A mismatch
 returns an error, never silent expansion. Bounds exceeding 250 systems are rejected
@@ -138,13 +144,19 @@ The stdio application supplies the adapters; shared consumers get the tool only
 when `createEveServer` receives `cartography` services. Registration does not download
 the SDE or load the native rasterizer. No hosted deployment is part of this change.
 
-Map SDE initializes lazily, checks the fixed CCP manifest at most every five minutes,
-and uses a map-only validated index plus immutable build-and-digest-addressed ZIPs in
-the existing SDE directory (`EVE_SDE_CACHE_DIR` override). It initially downloads the
-official ZIP independently of the skill index. It deliberately does not trust the
-legacy mutable `sde-jsonl.zip` to match a skill index's build. Failed refresh retains a
-labelled last-good map snapshot, and cannot break skill planning. Historical map ZIPs
-are retained; archive garbage collection is not yet provided.
+Map SDE initializes lazily, checks the fixed CCP manifest at five-minute intervals,
+and uses `maps-v1.sqlite` in the existing SDE directory (`EVE_SDE_CACHE_DIR`
+override). It initially downloads the official ZIP independently of the skill cache;
+new downloads are temporary rather than accumulating archived builds. Existing
+`map-catalog-v1.json` migrates only after its checksum, build identity, complete graph,
+and matching build-and-digest ZIP are validated. Legacy files are left untouched.
+
+Normal map requests use indexed name/boundary/connection reads in one SQLite read
+transaction, not a full-catalog reload. Full graph validation happens before atomic
+publication. A slower older download or freshness check cannot overwrite a newer
+snapshot. Failed refresh retains a labelled last-good snapshot and cannot break skill
+planning. The compatibility `initialize()` method used by offline scripts still
+loads a full catalog; MCP uses `prepare()` instead. See [local storage](local-storage.md).
 
 Generated SVG/manifest artifacts default to a `maps` directory beneath the SDE cache;
 override with **`EVE_MAP_ARTIFACT_DIR`** in the server environment. They expire after

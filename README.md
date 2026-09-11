@@ -47,7 +47,11 @@ npm run schema:update # replace the pin with canonical current OpenAPI JSON
 
 ## Install and configure an MCP host
 
-Once published, configure your MCP host to run the npm package directly:
+Requires **Node.js 22.13.0 or newer**, including its built-in `node:sqlite` module.
+No SQLite CLI, database service, or additional native database package is needed.
+Node versions that label SQLite experimental may print a warning to stderr;
+stdout remains reserved for MCP. Once published, configure your MCP host to run
+the npm package directly:
 
 ```json
 {
@@ -89,6 +93,11 @@ codex mcp list
 ```
 
 The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
+
+All 14 tools advertise structured output schemas, matching the shared contracts
+used by the hosted server. Successful results retain their direct object shape,
+including explicit partial results and freshness; they are not wrapped in a
+`result` property. Refresh the host's tool listing after an upgrade.
 
 For a named character's training plan, use `resolve_eve_entities` to select the character-category ID, `resolve_skill_plan_targets` to verify goals, then `generate_skill_plan` with that explicit character ID. The planner retrieves skills and queue itself. `get_character_context` remains available for character inspection, and other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected data uses EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
 
@@ -206,7 +215,7 @@ Do not commit tokens or client secrets. Tool responses never include the token, 
 
 Give `render_eve_map` a required `boundary` and `pointsOfInterest` list (use `[]`
 for none), plus optional already-ordered `routes`. Boundaries can name systems,
-a region, a constellation, or an absolute X/Z extent in light years. References
+a one-jump neighborhood, a region, a constellation, or an absolute X/Z extent in light years. References
 are exact names or numeric IDs. The renderer reads public cached SDE geography,
 not character data or a route-planning endpoint. It validates supplied connections
 without repairing, expanding or replanning them.
@@ -229,13 +238,31 @@ Generated files expire after seven days or earlier storage eviction. Configure
 their directory with `EVE_MAP_ARTIFACT_DIR`. The tool writes these local artifacts
 but never changes game state. See the [interface, limits and development examples](docs/cartography.md).
 
+For a center and all directly connected permanent-stargate neighbors, one call is
+enough. No ESI system/gate lookup sequence or character login is needed:
+
+```json
+{
+  "boundary": { "kind": "neighborhood", "center": "Jita", "jumps": 1 },
+  "pointsOfInterest": []
+}
+```
+
 ### Character skill training plans
 
-The executable planner supports published skills and ship hulls from CCP's [official JSONL SDE](https://developers.eveonline.com/docs/services/static-data/). On first startup it downloads the archive in the background; planning waits for initialization. The archive is roughly 95 MB at the verified build and can change in size. The cache retains the ZIP and a compact, validated skill/ship index. No character snapshots or credentials are written to this cache.
+The executable planner supports published skills and ship hulls from CCP's [official JSONL SDE](https://developers.eveonline.com/docs/services/static-data/). On first startup it downloads the archive in the background; planning waits for initialization. The archive is roughly 95 MB at the previously verified build and can change in size. The public cache uses `skills-v1.sqlite` for the validated skill/ship catalog and `maps-v1.sqlite` for indexed map projections. New archive downloads are temporary and removed after parsing/publication. No character snapshots, credentials, private ESI responses, or map annotations are written to either database.
 
 Defaults are `%LOCALAPPDATA%\eve-online-mcp\sde` on Windows, `~/Library/Caches/eve-online-mcp/sde` on macOS, and `$XDG_CACHE_HOME/eve-online-mcp/sde` or `~/.cache/eve-online-mcp/sde` on Linux. Set `EVE_SDE_CACHE_DIR` in the MCP server environment for a different location. In a container this is a container path: mount a persistent volume there to retain data between runs.
 
-Each initialization checks CCP's latest-build manifest when the last successful check is at least five minutes old; `initialize_static_data` with `{"refresh":true}` checks immediately. Conditional ETag requests avoid unchanged downloads. Cache publication is atomic and the index has a SHA-256 integrity check. A failed refresh returns the last validated build with a stale warning. A missing/corrupt cache plus download failure prevents planning rather than supplying empty requirements. Downloads use fixed CCP URLs, bounded streaming and selected ZIP entries, without extracting archive paths.
+Each initialization checks CCP's latest-build manifest when the last successful check is at least five minutes old; `initialize_static_data` with `{"refresh":true}` checks immediately. Conditional ETag requests avoid unchanged downloads. SQLite transactions fence build publication and freshness updates so a slower older writer cannot replace a newer build. A failed refresh retains the last validated build with a stale warning rather than supplying empty requirements. Downloads use fixed CCP URLs, bounded streaming and selected ZIP entries, without extracting archive paths.
+
+Existing checksum-validated JSON caches migrate automatically when the corresponding
+database is absent. Legacy files remain untouched, and an existing corrupt or
+unsupported database never silently falls back to older JSON. Maps read only the
+selected geography and touching connections from one SQLite snapshot; normal map
+requests do not deserialize the whole universe. Skill planning still loads its
+validated catalog into memory. See [local storage](docs/local-storage.md) for
+migration, recovery, concurrency, and performance limits.
 
 Example MCP tool arguments (replace `42` with the intended, verified character ID):
 
@@ -302,7 +329,7 @@ installing dependencies. The devcontainer and CI initialize the submodule.
 The library owns ESI validation and caching, token refresh and verification,
 MCP tool/resource/prompt registration, static-data parsing, and skill planning.
 This application supplies stdio transport, browser PKCE login, local credential
-and SDE files, and package metadata. Its small `src/` forwarding modules preserve
+and SQLite SDE storage, and package metadata. Its small `src/` forwarding modules preserve
 the existing local integration points. The build compiles the pinned library
 into `dist/` with the schema; npm installs need neither Git nor a library checkout.
 
@@ -312,9 +339,9 @@ devcontainer and this application's `npm run validate` and `npm pack --dry-run`
 in the application devcontainer. Application tests include the pinned library
 suite and local auth, credential, archive, and MCP integration coverage.
 
-The future hosted application will supply its own user-session auth and D1
-static-data adapter, with the requested four-hour ETag check. This extraction
-does not create or deploy that service.
+The hosted application uses the same shared tools with its own MCP OAuth,
+Cloudflare D1/R2 storage, and transport adapters. Those host-specific authentication
+and networking layers are not needed by the local stdio server.
 
 [`esi-schema-monitor.yml`](.github/workflows/esi-schema-monitor.yml) remains in **eve-online-mcp**, not the library repository. It runs daily at **07:23 UTC** and on demand. It checks out this application's pinned `lib` revision, downloads CCP's current schema, canonicalizes both documents, and compares SHA-256 hashes and operation definitions. It does not automatically replace the schema or approve new operations.
 

@@ -48,7 +48,7 @@
     "diagnostics:replay": "tsx lib/adapters/diagnostics-cli.ts replay"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "publishConfig": {
     "access": "public"
