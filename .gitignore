@@ -5,3 +5,6 @@ coverage/
 *.log
 *.tgz
 artifacts/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

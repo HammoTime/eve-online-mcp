@@ -1,22 +1,30 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { link, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
+import { createReadStream, existsSync } from "node:fs";
+import { mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { openPromise } from "yauzl";
 import * as z from "zod/v4";
 import { MAP_DATA_LIMITS, MapCatalog } from "../lib/src/cartography/catalog.js";
 import { MAP_DATA_FILES, parseMapData } from "../lib/src/cartography/parse.js";
+import { parseMapRequest } from "../lib/src/cartography/references.js";
+import type { PreparedMapDataSource } from "../lib/src/cartography/service.js";
 import {
   MapError,
   type MapData,
   type MapDataStatus,
+  type MapRequest,
 } from "../lib/src/cartography/types.js";
 import {
   jsonLines,
   type StaticDataEntry,
 } from "../lib/src/static-data-parser.js";
 import { DEFAULT_ESI_USER_AGENT } from "./package-metadata.js";
+import {
+  LocalMapStore,
+  MAP_DATABASE_FILE,
+  type MapSnapshot,
+} from "./map-store.js";
 import {
   defaultStaticDataDirectory,
   latestRecordSchema,
@@ -130,24 +138,32 @@ async function archiveChecksum(path: string, limit: number): Promise<string> {
   return hash.digest("hex");
 }
 
-/**
- * Map-only cache: never reads or alters catalog-v1.json or mutable sde-jsonl.zip.
- * Initially downloads the fixed CCP build URL independently of the skill cache.
- * Archives are immutable, addressed by build AND digest. Publish the complete
- * archive first, then atomically replace the index, the sole commit point.
- */
-export class LocalMapDataSource {
+function sameBuild(left: MapSnapshot, right: MapSnapshot): boolean {
+  return (
+    left.source.buildNumber === right.source.buildNumber &&
+    left.source.releaseDate === right.source.releaseDate &&
+    left.source.sourceUrl === right.source.sourceUrl &&
+    left.archiveSha256 === right.archiveSha256
+  );
+}
+
+/** Map-only SQLite cache. Full catalogs are retained only by legacy initialize(). */
+export class LocalMapDataSource implements PreparedMapDataSource {
   private readonly directory: string;
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
   private readonly readArchive: typeof readMapArchive;
   private readonly maxArchiveBytes: number;
+  private readonly store: LocalMapStore;
   private inFlight: Promise<MapResult> | undefined;
-  private saved: SavedMap | undefined;
+  private metadataInFlight: Promise<void> | undefined;
+  private saved: MapSnapshot | undefined;
+  private catalog: MapCatalog | undefined;
   private warning: string | undefined;
 
   constructor(options: LocalMapDataOptions = {}) {
     this.directory = options.directory ?? defaultStaticDataDirectory();
+    this.store = new LocalMapStore(this.directory);
     this.fetcher = options.fetchImplementation ?? fetch;
     this.now = options.now ?? Date.now;
     this.readArchive = options.readArchive ?? readMapArchive;
@@ -162,117 +178,206 @@ export class LocalMapDataSource {
 
   initialize(refresh = false): Promise<MapResult> {
     if (this.inFlight) return this.inFlight;
-    this.inFlight = this.load(refresh).finally(() => {
-      this.inFlight = undefined;
-    });
+    this.inFlight = this.ensure(refresh)
+      .then(() => {
+        try {
+          if (!this.catalog) {
+            const { catalog, snapshot } = this.store.loadCatalog();
+            this.remember(snapshot, this.warning);
+            this.catalog = catalog;
+          }
+          if (!this.saved) throw this.unavailable();
+          return { catalog: this.catalog, status: this.status(this.saved) };
+        } catch {
+          throw this.unavailable();
+        }
+      })
+      .finally(() => {
+        this.inFlight = undefined;
+      });
     return this.inFlight;
   }
 
-  private result(warning?: string): MapResult {
-    if (!this.saved)
-      throw new MapError(
-        "MAP_DATA_UNAVAILABLE",
-        "Map data has not been initialized.",
-      );
-    this.warning = warning;
-    const { catalog, checkedAt } = this.saved;
-    const { buildNumber, releaseDate, sourceUrl, fetchedAt } = catalog.data;
-    return {
-      catalog,
-      status: {
-        buildNumber,
-        releaseDate,
-        sourceUrl,
-        fetchedAt,
-        checkedAt,
-        stale: warning !== undefined,
-        ...(warning ? { warning } : {}),
-      },
-    };
-  }
-
-  private async persist(saved: SavedMap): Promise<void> {
-    const temporary = join(this.directory, `map-index-${randomUUID()}.tmp`);
-    const catalog = saved.catalog.data;
-    const text = JSON.stringify({
-      schemaVersion: 1,
-      checkedAt: saved.checkedAt,
-      etag: saved.etag,
-      sha256: checksum(catalog),
-      archiveSha256: saved.archiveSha256,
-      catalog,
+  async prepare(request: MapRequest, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const input = parseMapRequest(request);
+    signal?.throwIfAborted();
+    // Cancellation belongs to this waiter, not the shared public download.
+    const pending = this.ensure(false);
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => {
+        resolve();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      void pending.then(resolve, reject).finally(() => {
+        signal?.removeEventListener("abort", abort);
+      });
     });
-    if (Buffer.byteLength(text) > MAX_INDEX_BYTES)
-      throw new Error("Map index exceeds byte limit");
+    signal?.throwIfAborted();
     try {
-      await writeFile(temporary, text, { flag: "wx" });
-      await rename(temporary, join(this.directory, INDEX_FILE));
-    } finally {
-      await rm(temporary, { force: true });
+      const { scene, snapshot } = this.store.prepare(input, signal);
+      this.remember(snapshot, this.warning);
+      return { scene, status: this.status(snapshot) };
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (
+        error instanceof MapError &&
+        [
+          "MAP_REFERENCE_UNKNOWN",
+          "MAP_REFERENCE_AMBIGUOUS",
+          "EMPTY_MAP_BOUNDARY",
+          "MAP_TOO_LARGE",
+          "OUT_OF_BOUNDARY",
+          "INVALID_ROUTE_ADJACENCY",
+        ].includes(error.code)
+      )
+        throw error;
+      throw this.unavailable();
     }
   }
 
-  private async load(refresh: boolean): Promise<MapResult> {
-    let temporary: string | undefined;
+  private ensure(refresh: boolean): Promise<void> {
+    if (this.metadataInFlight) return this.metadataInFlight;
+    this.metadataInFlight = this.load(refresh).finally(() => {
+      this.metadataInFlight = undefined;
+    });
+    return this.metadataInFlight;
+  }
+
+  private status(snapshot: MapSnapshot): MapDataStatus {
+    return {
+      ...snapshot.source,
+      checkedAt: snapshot.checkedAt,
+      stale: this.warning !== undefined,
+      ...(this.warning ? { warning: this.warning } : {}),
+    };
+  }
+
+  private unavailable(): MapError {
+    this.warning =
+      "The last validated map metadata is available, but local map data could not be read.";
+    return new MapError(
+      "MAP_DATA_UNAVAILABLE",
+      "Map data is unavailable: CCP SDE download, validation or local cache publication failed. Retry initialization.",
+      this.saved ? { status: this.status(this.saved) } : {},
+    );
+  }
+
+  private remember(snapshot: MapSnapshot, warning?: string): void {
+    if (snapshot.source.sourceUrl !== sourceUrl(snapshot.source.buildNumber))
+      throw new Error("Map build identity mismatch");
+    if (
+      this.catalog &&
+      (!this.saved ||
+        !sameBuild(this.saved, snapshot) ||
+        this.saved.source.fetchedAt !== snapshot.source.fetchedAt)
+    )
+      this.catalog = undefined;
+    this.saved = snapshot;
+    this.warning = warning;
+  }
+
+  private published(snapshot: MapSnapshot, expected: MapSnapshot): void {
+    this.remember(
+      snapshot,
+      sameBuild(snapshot, expected) &&
+        snapshot.checkedAt === expected.checkedAt &&
+        snapshot.etag === expected.etag
+        ? undefined
+        : "Map cache changed during refresh; retained the validated stored build.",
+    );
+  }
+
+  private async readLegacy(): Promise<SavedMap> {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of createReadStream(
+      join(this.directory, INDEX_FILE),
+    )) {
+      const bytes = chunk as Buffer;
+      if ((size += bytes.byteLength) > MAX_INDEX_BYTES)
+        throw new Error("Map index exceeds byte limit");
+      chunks.push(bytes);
+    }
+    const index = indexSchema.parse(
+      JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    );
+    if (checksum(index.catalog) !== index.sha256)
+      throw new Error("Map index checksum mismatch");
+    const catalog = new MapCatalog(index.catalog as MapData);
+    if (catalog.data.sourceUrl !== sourceUrl(catalog.data.buildNumber))
+      throw new Error("Map build identity mismatch");
+    if (
+      (await archiveChecksum(
+        join(
+          this.directory,
+          archiveName(catalog.data.buildNumber, index.archiveSha256),
+        ),
+        this.maxArchiveBytes,
+      )) !== index.archiveSha256
+    )
+      throw new Error("Map archive checksum mismatch");
+    return {
+      catalog,
+      checkedAt: index.checkedAt,
+      etag: index.etag,
+      archiveSha256: index.archiveSha256,
+    };
+  }
+
+  private async load(refresh: boolean): Promise<void> {
     try {
       await mkdir(this.directory, { recursive: true });
-      if (!this.saved) {
-        try {
-          const chunks: Buffer[] = [];
-          let size = 0;
-          for await (const chunk of createReadStream(
-            join(this.directory, INDEX_FILE),
-          )) {
-            const bytes = chunk as Buffer;
-            if ((size += bytes.byteLength) > MAX_INDEX_BYTES)
-              throw new Error("Map index exceeds byte limit");
-            chunks.push(bytes);
-          }
-          const index = indexSchema.parse(
-            JSON.parse(Buffer.concat(chunks).toString("utf8")),
-          );
-          if (checksum(index.catalog) !== index.sha256)
-            throw new Error("Map index checksum mismatch");
-          const catalog = new MapCatalog(index.catalog as MapData);
-          if (catalog.data.sourceUrl !== sourceUrl(catalog.data.buildNumber))
-            throw new Error("Map build identity mismatch");
-          if (
-            (await archiveChecksum(
-              join(
-                this.directory,
-                archiveName(catalog.data.buildNumber, index.archiveSha256),
-              ),
-              this.maxArchiveBytes,
-            )) !== index.archiveSha256
-          )
-            throw new Error("Map archive checksum mismatch");
-          this.saved = {
-            catalog,
-            checkedAt: index.checkedAt,
-            etag: index.etag,
-            archiveSha256: index.archiveSha256,
-          };
-        } catch {
-          // A corrupt/incomplete index is never usable as an empty or stale map.
+      // SQLite is authoritative even if corrupt or from a future schema version.
+      const snapshot = this.store.read();
+      if (snapshot) {
+        this.remember(
+          snapshot,
+          this.saved && JSON.stringify(this.saved) === JSON.stringify(snapshot)
+            ? this.warning
+            : undefined,
+        );
+      } else if (this.saved) {
+        throw new Error("Local map snapshot disappeared");
+      } else if (!existsSync(join(this.directory, MAP_DATABASE_FILE))) {
+        const legacy = await this.readLegacy().catch(() => undefined);
+        if (legacy) {
+          const { catalog, ...metadata } = legacy;
+          this.published(this.store.publish(catalog, metadata), {
+            source: {
+              buildNumber: catalog.data.buildNumber,
+              releaseDate: catalog.data.releaseDate,
+              sourceUrl: catalog.data.sourceUrl,
+              fetchedAt: catalog.data.fetchedAt,
+            },
+            ...metadata,
+          });
         }
       }
+    } catch {
+      throw this.unavailable();
+    }
+    let temporary: string | undefined;
+    try {
       const age = this.saved
         ? this.now() - Date.parse(this.saved.checkedAt)
         : Infinity;
-      if (!refresh && age >= 0 && age < 300_000)
-        return this.result(this.warning);
+      if (!refresh && age >= 0 && age < 300_000) return;
+      const expected = this.saved;
       const signal = AbortSignal.timeout(180_000);
       const response = await this.fetcher(SDE_LATEST_URL, {
         headers: {
           "User-Agent": DEFAULT_ESI_USER_AGENT,
-          ...(this.saved?.etag ? { "If-None-Match": this.saved.etag } : {}),
+          ...(expected?.etag ? { "If-None-Match": expected.etag } : {}),
         },
         redirect: "error",
         signal,
       });
       let latest: z.infer<typeof latestRecordSchema> | undefined;
-      let etag = this.saved?.etag ?? null;
-      if (response.status !== 304 || !this.saved) {
+      let etag = expected?.etag ?? null;
+      if (response.status === 304 && !etag)
+        throw new Error("Unexpected unconditional map 304");
+      if (response.status !== 304) {
         if (!response.ok || !response.body) {
           await response.body?.cancel();
           throw new Error("Map manifest request failed");
@@ -312,30 +417,32 @@ export class LocalMapDataSource {
           throw new Error("Invalid map manifest ETag");
       }
       if (
-        this.saved &&
+        expected &&
         latest &&
-        latest.buildNumber < this.saved.catalog.data.buildNumber
-      )
-        return this.result(
+        latest.buildNumber < expected.source.buildNumber
+      ) {
+        this.remember(
+          this.store.read() ?? expected,
           "CCP returned an older build; retained the newer validated map cache.",
         );
+        return;
+      }
       if (
-        this.saved &&
-        (!latest || latest.buildNumber === this.saved.catalog.data.buildNumber)
+        expected &&
+        (!latest || latest.buildNumber === expected.source.buildNumber)
       ) {
-        if (
-          latest &&
-          latest.releaseDate !== this.saved.catalog.data.releaseDate
-        )
+        if (latest && latest.releaseDate !== expected.source.releaseDate)
           throw new Error("Map release identity changed for the same build");
         const saved = {
-          ...this.saved,
+          ...expected,
           checkedAt: new Date(this.now()).toISOString(),
           etag,
         };
-        await this.persist(saved);
-        this.saved = saved;
-        return this.result();
+        this.published(
+          this.store.touch(expected, saved.checkedAt, etag),
+          saved,
+        );
+        return;
       }
       if (!latest) throw new Error("Map manifest has no build");
       const metadata: MapMetadata = Object.freeze({
@@ -391,46 +498,19 @@ export class LocalMapDataSource {
         );
       const catalog = new MapCatalog(data);
       const archiveSha256 = hash.digest("hex");
-      const archivePath = join(
-        this.directory,
-        archiveName(latest.buildNumber, archiveSha256),
-      );
-      try {
-        // Hard-link publication is atomic and cannot overwrite another reader's archive.
-        await link(temporary, archivePath);
-      } catch (error) {
-        if (
-          !(error instanceof Error) ||
-          !("code" in error) ||
-          error.code !== "EEXIST"
-        )
-          throw error;
-        if (
-          (await archiveChecksum(archivePath, this.maxArchiveBytes)) !==
-          archiveSha256
-        )
-          throw new Error("Existing immutable map archive is corrupt", {
-            cause: error,
-          });
-      }
       const saved = {
-        catalog,
         checkedAt: new Date(this.now()).toISOString(),
         etag,
         archiveSha256,
       };
-      await this.persist(saved);
-      this.saved = saved;
-      return this.result();
+      this.published(this.store.publish(catalog, saved), {
+        source: metadata,
+        ...saved,
+      });
     } catch {
-      if (this.saved)
-        return this.result(
-          "Map SDE check, download or validation failed; using the last validated local build.",
-        );
-      throw new MapError(
-        "MAP_DATA_UNAVAILABLE",
-        "Map data is unavailable: CCP SDE download, validation or local cache publication failed. Retry initialization.",
-      );
+      if (!this.saved) throw this.unavailable();
+      this.warning =
+        "Map SDE check, download or validation failed; using the last validated local build.";
     } finally {
       // Cleanup failure must not discard a successfully published or last-good map.
       if (temporary)
