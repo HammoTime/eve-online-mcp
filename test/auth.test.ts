@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -79,6 +80,8 @@ describe("token providers", () => {
   it("uses a static access token when configured", async () => {
     const provider = tokenProviderFromEnvironment({
       EVE_ACCESS_TOKEN: "access",
+      EVE_CLIENT_ID: "test-client",
+      EVE_REFRESH_TOKEN: "fake-refresh",
     });
     await expect(provider.getAccessToken()).resolves.toBe("access");
     await expect(
@@ -300,6 +303,109 @@ describe("token providers", () => {
     expect((await store.read()).legacyCredential).toBeUndefined();
   });
 
+  it.each(["superseded", "replacement"] as const)(
+    "rejects an in-flight legacy migration while preserving the current %s generation",
+    async (scenario) => {
+      const store = await temporaryStore();
+      const { clientId, refreshToken, scopes, createdAt } = testCredential(42);
+      await writeFile(
+        store.path,
+        JSON.stringify({ clientId, refreshToken, scopes, createdAt }),
+      );
+      const legacy = (await store.read()).legacyCredential;
+      if (!legacy) throw new Error("Missing fixture credential");
+      const newer = {
+        ...testCredential(42, [...trainingScopes, "scope.new"]),
+        clientId: "new-test-client",
+        characterName: "New test identity",
+        refreshToken: "fake-refresh-42-new-login",
+        createdAt: "2026-02-01T00:00:00.000Z",
+      };
+      const newToken = testToken(42, newer.scopes);
+      const refresh = vi.fn<typeof fetch>((_url, init) => {
+        const isNew =
+          (init?.body as URLSearchParams).get("refresh_token") ===
+          newer.refreshToken;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: isNew ? newToken : testToken(42),
+              expires_in: 1200,
+              ...(isNew ? {} : { refresh_token: "fake-refresh-42-rotated" }),
+            }),
+          ),
+        );
+      });
+      let enter = () => {
+        /* Assigned by the promise executor. */
+      };
+      let resume = () => {
+        /* Assigned by the promise executor. */
+      };
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const verify = vi
+        .fn(testVerifier)
+        .mockImplementationOnce(async (token, expectedClient) => {
+          const identity = await testVerifier(token, expectedClient);
+          enter();
+          await gate;
+          return identity;
+        });
+      const provider = new StoredCredentialTokenProvider(
+        store,
+        refresh,
+        verify,
+      );
+      const pending = provider.getAccessToken(trainingScopes);
+      const rejected = expect(pending).rejects.toThrow(
+        "changed during refresh",
+      );
+      try {
+        await entered;
+        const other = new CredentialStore(store.path);
+        await other.write(newer);
+        await other.select(42);
+        if (scenario === "replacement") {
+          const current = await other.read();
+          // Replace only the legacy generation, retaining the current login metadata.
+          await writeFile(
+            store.path,
+            JSON.stringify({
+              ...current,
+              legacyCredential: { ...legacy, generation: randomUUID() },
+            }),
+          );
+        }
+        const expected = await other.read();
+        if (scenario === "superseded") delete expected.legacyCredential;
+        else
+          expect(expected.legacyCredential?.generation).not.toBe(
+            legacy.generation,
+          );
+        resume();
+        await rejected;
+        expect(await other.read()).toEqual(expected);
+        expect(refresh).toHaveBeenCalledOnce();
+        if (scenario === "superseded") {
+          await expect(provider.getAccessToken(newer.scopes)).resolves.toBe(
+            newToken,
+          );
+          expect(verify).toHaveBeenLastCalledWith(newToken, newer.clientId);
+          expect(refresh).toHaveBeenCalledTimes(2);
+          expect(await other.read()).toEqual(expected);
+        }
+      } finally {
+        resume();
+        await pending.catch(() => undefined);
+      }
+    },
+  );
+
   it("reloads credentials changed by another process without overwriting rotation", async () => {
     const store = await temporaryStore();
     await store.write(testCredential(42));
@@ -329,5 +435,183 @@ describe("token providers", () => {
     expect((await store.read()).characters[0]?.refreshToken).toBe(
       "fake-refresh-42-external-rotated",
     );
+  });
+
+  it.each(["rotated", "unchanged", "omitted"] as const)(
+    "rejects credential lifecycle changes during verification with %s refresh tokens",
+    async (rotation) => {
+      for (const change of [
+        "logout",
+        "logout-all",
+        "reconnect",
+        "client",
+        "scopes",
+      ] as const) {
+        const store = await temporaryStore();
+        await store.write(testCredential(42));
+        let enter = () => {
+          /* Assigned by the promise executor. */
+        };
+        let resume = () => {
+          /* Assigned by the promise executor. */
+        };
+        const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        });
+        const gate = new Promise<void>((resolve) => {
+          resume = resolve;
+        });
+        const refresh = vi.fn<typeof fetch>(() =>
+          Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: testToken(42),
+                expires_in: 1200,
+                ...(rotation === "omitted"
+                  ? {}
+                  : {
+                      refresh_token:
+                        rotation === "rotated"
+                          ? "fake-refresh-42-rotated"
+                          : "fake-refresh-42",
+                    }),
+              }),
+            ),
+          ),
+        );
+        const provider = new StoredCredentialTokenProvider(
+          store,
+          refresh,
+          async (token) => {
+            enter();
+            await gate;
+            return testVerifier(token, "test-client");
+          },
+        );
+        const pending = provider.getAccessToken(trainingScopes, 42);
+        const rejected = expect(pending).rejects.toThrow(
+          "changed during refresh",
+        );
+        try {
+          await entered;
+          const other = new CredentialStore(store.path);
+          if (change === "logout" || change === "reconnect")
+            await other.remove(42);
+          if (change === "logout-all") await other.remove();
+          if (change === "reconnect") await other.write(testCredential(42));
+          if (change === "client")
+            await other.write({
+              ...testCredential(42),
+              clientId: "other-test-client",
+            });
+          if (change === "scopes") await other.write(testCredential(42, []));
+          const saved = await other.read();
+          resume();
+          await rejected;
+          expect(await store.read()).toEqual(saved);
+          if (change === "logout" || change === "logout-all") {
+            await expect(
+              provider.getAccessToken(trainingScopes, 42),
+            ).resolves.toBeUndefined();
+          } else if (change === "scopes") {
+            await expect(
+              provider.getAccessToken(trainingScopes, 42),
+            ).rejects.toMatchObject({ code: "MISSING_SCOPES" });
+          } else {
+            await expect(
+              provider.getAccessToken(trainingScopes, 42),
+            ).resolves.toBe(testToken(42));
+            expect(refresh).toHaveBeenCalledTimes(2);
+          }
+        } finally {
+          resume();
+          await pending.catch(() => undefined);
+        }
+      }
+    },
+  );
+
+  it("rechecks after rotation persistence before returning or caching the token", async () => {
+    const store = await temporaryStore();
+    await store.write(testCredential(42));
+    const rotate = store.rotate.bind(store);
+    vi.spyOn(store, "rotate").mockImplementationOnce(
+      async (previous, replacement) => {
+        const current = await rotate(previous, replacement);
+        await new CredentialStore(store.path).remove(42);
+        return current;
+      },
+    );
+    const provider = new StoredCredentialTokenProvider(
+      store,
+      refreshMock(),
+      testVerifier,
+    );
+    await expect(provider.getAccessToken(trainingScopes, 42)).rejects.toThrow(
+      "changed during refresh",
+    );
+    await expect(
+      provider.getAccessToken(trainingScopes, 42),
+    ).resolves.toBeUndefined();
+  });
+
+  it("invalidates cached access tokens on identical reconnects without relying on timestamps", async () => {
+    const store = await temporaryStore();
+    await store.write(testCredential(42));
+    const refresh = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: testToken(42),
+            expires_in: 1200,
+          }),
+        ),
+      ),
+    );
+    const provider = new StoredCredentialTokenProvider(
+      store,
+      refresh,
+      testVerifier,
+    );
+    await provider.getAccessToken(trainingScopes, 42);
+    await provider.getAccessToken(trainingScopes, 42);
+    expect(refresh).toHaveBeenCalledOnce();
+    const other = new CredentialStore(store.path);
+    await other.remove();
+    await other.write(testCredential(42));
+    await provider.getAccessToken(trainingScopes, 42);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    const assertCurrent = store.assertCurrent.bind(store);
+    vi.spyOn(store, "assertCurrent").mockImplementationOnce(
+      async (previous) => {
+        await other.remove();
+        await assertCurrent(previous);
+      },
+    );
+    await expect(provider.getAccessToken(trainingScopes, 42)).rejects.toThrow(
+      "changed during refresh",
+    );
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects refreshed signed identities missing saved scopes without persisting rotation", async () => {
+    const store = await temporaryStore();
+    await store.write(testCredential(42));
+    const saved = await store.read();
+    const provider = new StoredCredentialTokenProvider(
+      store,
+      refreshMock(),
+      () =>
+        Promise.resolve({
+          characterId: 42,
+          characterName: "Test Pilot 42",
+          scopes: [],
+        }),
+    );
+    await expect(
+      provider.getAccessToken(trainingScopes, 42),
+    ).rejects.toMatchObject({ code: "MISSING_SCOPES" });
+    expect(await store.read()).toEqual(saved);
   });
 });

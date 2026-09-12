@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skillFixture } from "../lib/test/skill-fixtures.js";
+import type { ReplayManifest } from "../lib/src/diagnostics.js";
 
 const sent: string[] = [];
 const collector = createServer((request, response) => {
@@ -128,7 +129,14 @@ try {
       const capture = files.find((name) => /^[a-f0-9]{32}\.json$/u.test(name));
       assert.ok(capture, `No diagnostic capture on ${mode}`);
       const body = await readFile(join(directory, mode, capture), "utf8");
-      assert.ok(body.includes("static_catalog"));
+      const manifest = JSON.parse(body) as ReplayManifest;
+      assert.equal(manifest.traceId, result._meta?.["eve/trace-id"]);
+      assert.equal(manifest.status, "partial");
+      assert.ok(manifest.reasons.includes("catalog_artifact_unavailable"));
+      assert.deepEqual(manifest.catalogs, []);
+      assert.deepEqual(manifest.dependencies, []);
+      assert.equal(manifest.request.tool, "get_skill_dependencies");
+      assert.ok(!body.includes('"types"'), "Full catalog leaked into capture");
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
     }
@@ -142,7 +150,7 @@ try {
   ])
     assert.ok(payload.includes(expected), `Missing ${expected}`);
   console.log(
-    "Built stdio server exported correlated spans, logs, delta metrics and catalog artifacts on EOF and SIGTERM; stdout contained only JSON-RPC.",
+    "Built stdio server exported correlated spans, logs, delta metrics and honest partial query-only captures on EOF and SIGTERM; stdout contained only JSON-RPC.",
   );
 } finally {
   clearTimeout(timeout);

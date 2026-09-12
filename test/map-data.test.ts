@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocalMapDataSource, readMapArchive } from "../src/map-data.js";
 import { LocalMapStore, MAP_DATABASE_FILE } from "../src/map-store.js";
+import { withSdeArchive } from "../src/sde-archive-cache.js";
 import { SDE_LATEST_URL } from "../src/static-data.js";
 import {
   mapRequestSchema,
@@ -209,7 +210,7 @@ describe("local map source", () => {
     expect(first.catalog.resolveSystem(100).securityStatus).toBe(0.449);
     expect(readArchive).toHaveBeenCalledTimes(1);
     expect(readArchive).toHaveBeenCalledWith(
-      expect.stringMatching(/map-archive-.*\.tmp$/),
+      expect.stringMatching(/sde-archives-v1[/\\]archive-[01]\.zip$/),
       metadata,
     );
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
@@ -243,7 +244,12 @@ describe("local map source", () => {
       "untrusted-legacy-build",
     );
     expect(await cacheFiles(directory)).toEqual(
-      ["catalog-v1.json", MAP_DATABASE_FILE, "sde-jsonl.zip"].sort(),
+      [
+        "catalog-v1.json",
+        MAP_DATABASE_FILE,
+        "sde-jsonl.zip",
+        "sde-archives-v1",
+      ].sort(),
     );
   });
   it("checks at five minutes with ETags and preserves catalog identity for 304/same-build responses", async () => {
@@ -273,7 +279,7 @@ describe("local map source", () => {
     await source.initialize();
     expect(fetcher).toHaveBeenCalledTimes(5);
   });
-  it("atomically publishes new SQLite builds without retaining ZIPs and rejects downgrades", async () => {
+  it("atomically publishes new SQLite builds, retains only the newest shared ZIP and rejects downgrades", async () => {
     const { source, fetcher, directory } = await setup();
     download(fetcher);
     const first = await source.initialize();
@@ -289,7 +295,15 @@ describe("local map source", () => {
       archiveSha256: digest("new archive"),
     });
     expect(store.loadCatalog().catalog.data).toEqual(second.catalog.data);
-    expect(await cacheFiles(directory)).toEqual([MAP_DATABASE_FILE]);
+    expect(await cacheFiles(directory)).toEqual([
+      MAP_DATABASE_FILE,
+      "sde-archives-v1",
+    ]);
+    expect(
+      (await readdir(join(directory, "sde-archives-v1"))).filter((name) =>
+        name.endsWith(".zip"),
+      ),
+    ).toHaveLength(1);
     fetcher.mockResolvedValueOnce(manifest(123));
     const downgrade = await source.initialize(true);
     expect(downgrade.catalog).toBe(second.catalog);
@@ -318,14 +332,17 @@ describe("local map source", () => {
     readArchive.mockRejectedValueOnce(new Error("Bad ZIP"));
     expect((await source.initialize(true)).catalog).toBe(first.catalog);
     fetcher
-      .mockResolvedValueOnce(manifest(124))
+      .mockResolvedValueOnce(manifest(125))
       .mockRejectedValueOnce(new Error("Offline"));
     expect((await source.initialize(true)).status.stale).toBe(true);
     fetcher.mockResolvedValueOnce(manifest(123, "2026-09-02T00:00:00Z"));
     expect((await source.initialize(true)).status.stale).toBe(true);
     expect(store.read()).toEqual(snapshotBefore);
     expect(store.loadCatalog().catalog.data).toEqual(first.catalog.data);
-    expect(await cacheFiles(directory)).toEqual([MAP_DATABASE_FILE]);
+    expect(await cacheFiles(directory)).toEqual([
+      MAP_DATABASE_FILE,
+      "sde-archives-v1",
+    ]);
     fetcher.mockResolvedValueOnce(new Response(null, { status: 304 }));
     expect((await source.initialize(true)).status.stale).toBe(false);
   });
@@ -433,6 +450,7 @@ describe("local map source", () => {
         MAP_DATABASE_FILE,
         "map-catalog-v1.json",
         archiveName(123, archive),
+        "sde-archives-v1",
       ].sort(),
     );
   });
@@ -583,7 +601,10 @@ describe("local map source", () => {
         });
       expect(store.read()).toEqual(authoritative);
       expect(load).toHaveBeenCalledTimes(method === "initialize" ? 1 : 0);
-      expect(await cacheFiles(directory)).toEqual([MAP_DATABASE_FILE]);
+      expect(await cacheFiles(directory)).toEqual([
+        MAP_DATABASE_FILE,
+        "sde-archives-v1",
+      ]);
     },
   );
   it.each([304, 200])(
@@ -800,8 +821,11 @@ describe("local map source", () => {
     expect(results[0].catalog.data).toEqual(results[1].catalog.data);
     const disk = await new LocalMapDataSource(options).initialize();
     expect(disk.status.stale).toBe(false);
-    expect(fetcher).toHaveBeenCalledTimes(4);
-    expect(await cacheFiles(directory)).toEqual([MAP_DATABASE_FILE]);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(await cacheFiles(directory)).toEqual([
+      MAP_DATABASE_FILE,
+      "sde-archives-v1",
+    ]);
   });
   it("does not swap last-good state or checkedAt when SQLite touch or publication fails", async () => {
     const { source, fetcher, directory, now } = await setup();
@@ -929,7 +953,10 @@ describe("local map source", () => {
         new LocalMapDataSource({ ...options, maxArchiveBytes: 4 }).initialize(),
       ).rejects.toMatchObject({ code: "MAP_DATA_UNAVAILABLE" });
       expect(readArchive).not.toHaveBeenCalled();
-      expect(await readdir(directory)).toEqual([]);
+      expect(await readdir(directory)).toEqual(["sde-archives-v1"]);
+      expect(await readdir(join(directory, "sde-archives-v1"))).toEqual([
+        "index.sqlite",
+      ]);
     },
   );
   it.each([
@@ -951,7 +978,7 @@ describe("local map source", () => {
       await expect(source.initialize()).rejects.toMatchObject({
         code: "MAP_DATA_UNAVAILABLE",
       });
-      expect(await readdir(directory)).toEqual([]);
+      expect(await readdir(directory)).toEqual(["sde-archives-v1"]);
     },
   );
   it.each([0, -1, NaN, Infinity, 1.5, 256_000_001])(
@@ -973,7 +1000,47 @@ describe("local map source", () => {
     await expect(source.initialize()).rejects.toMatchObject({
       code: "MAP_DATA_UNAVAILABLE",
     });
-    expect(await readdir(directory)).toEqual([]);
+    expect(await readdir(directory)).toEqual(["sde-archives-v1"]);
+  });
+  it("uses a previous independent consumer's retained ZIP for the first map call, while checking its own manifest", async () => {
+    const { source, fetcher, directory, readArchive } = await setup();
+    const skillFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("archive"));
+    await withSdeArchive(
+      {
+        directory,
+        source: metadata,
+        fetchImplementation: skillFetch,
+        userAgent: "test",
+        maxArchiveBytes: 256_000_000,
+      },
+      async (path, sha256) => {
+        expect(await readFile(path, "utf8")).toBe("archive");
+        expect(sha256).toBe(digest("archive"));
+      },
+    );
+    fetcher.mockResolvedValueOnce(manifest());
+    expect((await source.prepare(request())).status.stale).toBe(false);
+    expect(readArchive).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([SDE_LATEST_URL]);
+    expect(skillFetch).toHaveBeenCalledTimes(1);
+  });
+  it("retains last-good maps when the shared archive store is unknown, without overwriting it", async () => {
+    const { source, fetcher, directory } = await setup();
+    download(fetcher);
+    const first = await source.initialize();
+    const path = join(directory, "sde-archives-v1", "index.sqlite");
+    const db = new DatabaseSync(path);
+    db.exec("PRAGMA user_version = 99");
+    db.close();
+    const before = await readFile(path);
+    fetcher.mockResolvedValueOnce(manifest(124));
+    const result = await source.initialize(true);
+    expect(result.catalog).toBe(first.catalog);
+    expect(result.status.stale).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(await readFile(path)).toEqual(before);
   });
 });
 

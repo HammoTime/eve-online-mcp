@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { openPromise } from "yauzl";
@@ -20,6 +20,7 @@ import {
   type StaticDataEntry,
 } from "../lib/src/static-data-parser.js";
 import { DEFAULT_ESI_USER_AGENT } from "./package-metadata.js";
+import { withSdeArchive } from "./sde-archive-cache.js";
 import {
   LocalMapStore,
   MAP_DATABASE_FILE,
@@ -357,7 +358,6 @@ export class LocalMapDataSource implements PreparedMapDataSource {
     } catch {
       throw this.unavailable();
     }
-    let temporary: string | undefined;
     try {
       const age = this.saved
         ? this.now() - Date.parse(this.saved.checkedAt)
@@ -451,70 +451,43 @@ export class LocalMapDataSource implements PreparedMapDataSource {
         sourceUrl: sourceUrl(latest.buildNumber),
         fetchedAt: new Date(this.now()).toISOString(),
       });
-      const archive = await this.fetcher(metadata.sourceUrl, {
-        headers: { "User-Agent": DEFAULT_ESI_USER_AGENT },
-        redirect: "error",
-        signal,
-      });
-      if (
-        !archive.ok ||
-        !archive.body ||
-        Number(archive.headers.get("content-length")) > this.maxArchiveBytes
-      ) {
-        await archive.body?.cancel();
-        throw new Error("Map archive request failed or exceeds byte limit");
-      }
-      temporary = join(this.directory, `map-archive-${randomUUID()}.tmp`);
-      const reader = archive.body.getReader();
-      const hash = createHash("sha256");
-      try {
-        const file = await open(temporary, "wx");
-        try {
-          let size = 0;
-          for (;;) {
-            const part = await reader.read();
-            if (part.done) break;
-            if ((size += part.value.byteLength) > this.maxArchiveBytes)
-              throw new Error("Map archive exceeds byte limit");
-            hash.update(part.value);
-            await file.writeFile(part.value);
-          }
-        } finally {
-          await file.close();
-        }
-      } finally {
-        await reader.cancel();
-      }
-      const data = await this.readArchive(temporary, metadata);
-      // An injected reader must not mislabel a downloaded build, even with valid data.
-      if (
-        data.buildNumber !== metadata.buildNumber ||
-        data.releaseDate !== metadata.releaseDate ||
-        data.sourceUrl !== metadata.sourceUrl ||
-        data.fetchedAt !== metadata.fetchedAt
-      )
-        throw new Error(
-          "Parsed map metadata does not match the requested build",
-        );
-      const catalog = new MapCatalog(data);
-      const archiveSha256 = hash.digest("hex");
-      const saved = {
-        checkedAt: new Date(this.now()).toISOString(),
-        etag,
-        archiveSha256,
-      };
-      this.published(this.store.publish(catalog, saved), {
-        source: metadata,
-        ...saved,
-      });
+      await withSdeArchive(
+        {
+          directory: this.directory,
+          source: metadata,
+          fetchImplementation: this.fetcher,
+          userAgent: DEFAULT_ESI_USER_AGENT,
+          maxArchiveBytes: this.maxArchiveBytes,
+          now: this.now,
+        },
+        async (archivePath, archiveSha256) => {
+          const data = await this.readArchive(archivePath, metadata);
+          // An injected reader must not mislabel a downloaded build, even with valid data.
+          if (
+            data.buildNumber !== metadata.buildNumber ||
+            data.releaseDate !== metadata.releaseDate ||
+            data.sourceUrl !== metadata.sourceUrl ||
+            data.fetchedAt !== metadata.fetchedAt
+          )
+            throw new Error(
+              "Parsed map metadata does not match the requested build",
+            );
+          const catalog = new MapCatalog(data);
+          const saved = {
+            checkedAt: new Date(this.now()).toISOString(),
+            etag,
+            archiveSha256,
+          };
+          this.published(this.store.publish(catalog, saved), {
+            source: metadata,
+            ...saved,
+          });
+        },
+      );
     } catch {
       if (!this.saved) throw this.unavailable();
       this.warning =
         "Map SDE check, download or validation failed; using the last validated local build.";
-    } finally {
-      // Cleanup failure must not discard a successfully published or last-good map.
-      if (temporary)
-        await rm(temporary, { force: true }).catch(() => undefined);
     }
   }
 }

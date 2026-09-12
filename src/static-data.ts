@@ -1,11 +1,11 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import * as z from "zod/v4";
 import { DEFAULT_ESI_USER_AGENT } from "./package-metadata.js";
 import { readStaticArchive } from "./static-data-archive.js";
-import { SkillCatalog, typeId } from "./skill-data.js";
+import { typeId } from "./skill-data.js";
+import { withSdeArchive } from "./sde-archive-cache.js";
 import {
   SkillStore,
   skillBuildSourceUrl,
@@ -44,14 +44,14 @@ interface CacheOptions {
   maxArchiveBytes?: number;
 }
 
-/** One validated in-memory build per plan, backed by fenced SQLite publication. */
+/** Singleflight owns metadata only; every caller owns a separately released read snapshot. */
 export class StaticDataCache implements StaticDataSource {
   private readonly directory: string;
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
   private readonly readArchive: typeof readStaticArchive;
   private readonly maxArchiveBytes: number;
-  private inFlight: ReturnType<StaticDataSource["initialize"]> | undefined;
+  private inFlight: ReturnType<StaticDataCache["load"]> | undefined;
   private lastWarning: string | undefined;
   private saved: SavedSkills | undefined;
   private readonly store: SkillStore;
@@ -63,34 +63,40 @@ export class StaticDataCache implements StaticDataSource {
     this.readArchive = options.readArchive ?? readStaticArchive;
     this.maxArchiveBytes = options.maxArchiveBytes ?? 256_000_000;
   }
-  initialize(refresh = false) {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.load(refresh).finally(() => {
+  async initialize(refresh = false) {
+    this.inFlight ??= this.load(refresh).finally(() => {
       this.inFlight = undefined;
     });
-    return this.inFlight;
+    const result = await this.inFlight;
+    try {
+      const snapshot = this.store.acquire();
+      const data = snapshot.saved.metadata;
+      return {
+        catalog: snapshot.catalog,
+        release: snapshot.release,
+        status: {
+          buildNumber: data.buildNumber,
+          releaseDate: data.releaseDate,
+          sourceUrl: data.sourceUrl,
+          fetchedAt: data.fetchedAt,
+          typeCount: data.typeCount,
+          skillCount: data.skillCount,
+          checkedAt: snapshot.saved.checkedAt,
+          stale: result.stale,
+          cacheDirectory: this.directory,
+          ...(result.warning ? { warning: result.warning } : {}),
+        },
+      };
+    } catch {
+      throw new Error(
+        "Static data is unavailable. Check the local SDE cache configuration and retry initialize_static_data.",
+      );
+    }
   }
   private result(stale = false, warning?: string) {
     if (!this.saved) throw new Error("Static data has not been initialized");
     this.lastWarning = warning;
-    const { data } = this.saved.catalog;
-    return {
-      catalog: this.saved.catalog,
-      status: {
-        buildNumber: data.buildNumber,
-        releaseDate: data.releaseDate,
-        sourceUrl: data.sourceUrl,
-        fetchedAt: data.fetchedAt,
-        checkedAt: this.saved.checkedAt,
-        stale,
-        cacheDirectory: this.directory,
-        typeCount: data.types.length,
-        skillCount: data.types.filter(
-          (type) => type.categoryId === 16 && type.published,
-        ).length,
-        ...(warning ? { warning } : {}),
-      },
-    };
+    return { stale, warning };
   }
   private published(result: ReturnType<SkillStore["publish"]>) {
     this.saved = result.saved;
@@ -195,14 +201,14 @@ export class StaticDataCache implements StaticDataSource {
         "Static data is unavailable. Retry initialize_static_data when CCP is reachable.",
       );
     }
-    if (this.saved && latest.buildNumber < this.saved.catalog.data.buildNumber)
+    if (this.saved && latest.buildNumber < this.saved.metadata.buildNumber)
       return this.result(
         true,
         "CCP returned an older build; retained the newer validated cache.",
       );
-    if (this.saved?.catalog.data.buildNumber === latest.buildNumber) {
+    if (this.saved?.metadata.buildNumber === latest.buildNumber) {
       try {
-        if (this.saved.catalog.data.releaseDate !== latest.releaseDate)
+        if (this.saved.metadata.releaseDate !== latest.releaseDate)
           throw new Error("Conflicting SDE build identity");
         return this.published(
           this.store.check(
@@ -219,68 +225,42 @@ export class StaticDataCache implements StaticDataSource {
       }
     }
     const sourceUrl = skillBuildSourceUrl(latest.buildNumber);
-    const temporary = join(this.directory, `archive-${randomUUID()}.tmp`);
     try {
-      try {
-        if (
-          !Number.isSafeInteger(this.maxArchiveBytes) ||
-          this.maxArchiveBytes <= 0
-        )
-          throw new Error("Invalid SDE archive byte limit");
-        const response = await this.fetcher(sourceUrl, {
-          headers: { "User-Agent": DEFAULT_ESI_USER_AGENT },
-          redirect: "error",
-          signal,
-        });
-        if (!response.ok || !response.body)
-          throw new Error("SDE archive request failed");
-        if (
-          Number(response.headers.get("content-length")) > this.maxArchiveBytes
-        ) {
-          await response.body.cancel();
-          throw new Error("SDE archive exceeds byte limit");
-        }
-        const reader = response.body.getReader();
-        try {
-          const file = await open(temporary, "wx");
+      return await withSdeArchive(
+        {
+          directory: this.directory,
+          source: { ...latest, sourceUrl },
+          fetchImplementation: this.fetcher,
+          userAgent: DEFAULT_ESI_USER_AGENT,
+          maxArchiveBytes: this.maxArchiveBytes,
+          now: this.now,
+        },
+        async (path) => {
+          const stage = await this.readArchive(path, {
+            buildNumber: latest.buildNumber,
+            releaseDate: latest.releaseDate,
+            sourceUrl,
+            fetchedAt: new Date(this.now()).toISOString(),
+          });
           try {
-            let size = 0;
-            for (;;) {
-              const part = await reader.read();
-              if (part.done) break;
-              size += part.value.byteLength;
-              if (size > this.maxArchiveBytes)
-                throw new Error("SDE archive exceeds byte limit");
-              await file.writeFile(part.value);
-            }
+            const data = stage.result().metadata;
+            if (
+              data.buildNumber !== latest.buildNumber ||
+              data.releaseDate !== latest.releaseDate
+            )
+              throw new Error("SDE archive metadata mismatch");
+            return this.published(
+              this.store.publishImport(
+                stage,
+                new Date(this.now()).toISOString(),
+                etag,
+              ),
+            );
           } finally {
-            await file.close();
+            stage.dispose();
           }
-        } finally {
-          await reader.cancel();
-        }
-        const data = await this.readArchive(temporary, {
-          buildNumber: latest.buildNumber,
-          releaseDate: latest.releaseDate,
-          sourceUrl,
-          fetchedAt: new Date(this.now()).toISOString(),
-        });
-        const catalog = new SkillCatalog(data);
-        if (
-          data.buildNumber !== latest.buildNumber ||
-          data.releaseDate !== latest.releaseDate
-        )
-          throw new Error("SDE archive metadata mismatch");
-        return this.published(
-          this.store.publish({
-            catalog,
-            checkedAt: new Date(this.now()).toISOString(),
-            etag,
-          }),
-        );
-      } finally {
-        await rm(temporary, { force: true });
-      }
+        },
+      );
     } catch {
       if (this.saved)
         return this.result(

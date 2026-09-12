@@ -1,6 +1,7 @@
 import {
   CredentialStore,
   defaultCredentialPath,
+  sameCredential,
   type CharacterCredential,
 } from "./credential-store.js";
 import { loginWithEveSso, type SsoLoginOptions } from "./sso.js";
@@ -104,13 +105,7 @@ export class StoredCredentialTokenProvider implements TokenProvider {
           { characterId: selected, missingScopes },
         );
       let cached = this.providers.get(selected);
-      if (
-        cached?.credential.refreshToken !== credential.refreshToken ||
-        cached.credential.clientId !== credential.clientId ||
-        cached.credential.createdAt !== credential.createdAt ||
-        JSON.stringify(cached.credential.scopes) !==
-          JSON.stringify(credential.scopes)
-      ) {
+      if (!cached || !sameCredential(cached.credential, credential)) {
         const entry = {
           credential,
           provider: new RefreshTokenProvider(
@@ -119,8 +114,10 @@ export class StoredCredentialTokenProvider implements TokenProvider {
             undefined,
             this.fetchImplementation,
             async (refreshToken) => {
-              await this.store.rotate(entry.credential, refreshToken);
-              entry.credential = { ...entry.credential, refreshToken };
+              entry.credential = await this.store.rotate(
+                entry.credential,
+                refreshToken,
+              );
             },
             async (token) => {
               const identity = await this.verify(token, credential.clientId);
@@ -133,13 +130,31 @@ export class StoredCredentialTokenProvider implements TokenProvider {
                     authenticatedCharacterId: identity.characterId,
                   },
                 );
+              const missingScopes = credential.scopes.filter(
+                (scope) => !identity.scopes.includes(scope),
+              );
+              if (missingScopes.length)
+                throw new AuthenticationError(
+                  "The refreshed EVE authorization lacks saved scopes; authorize the character again.",
+                  "MISSING_SCOPES",
+                  { characterId: selected, missingScopes },
+                );
             },
           ),
         };
         cached = entry;
         this.providers.set(selected, cached);
       }
-      return cached.provider.getAccessToken();
+      try {
+        const token = await cached.provider.getAccessToken();
+        // Refresh verification and rotation both await external work. Recheck
+        // even for a cached token or a response without refresh-token rotation.
+        await this.store.assertCurrent(cached.credential);
+        return token;
+      } catch (error) {
+        this.providers.delete(selected);
+        throw error;
+      }
     });
   }
 }

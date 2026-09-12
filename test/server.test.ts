@@ -17,6 +17,7 @@ import { fixtureDocument } from "./fixtures.js";
 import { fixtureSource, skillFixture } from "./skill-fixtures.js";
 import { StaticDataCache, type StaticDataSource } from "../src/static-data.js";
 import type { readStaticArchive } from "../src/static-data-archive.js";
+import { SkillImport } from "../src/skill-store.js";
 import type { OpenApiDocument } from "../src/types.js";
 import type { SsoLoginOptions } from "../src/sso.js";
 import {
@@ -371,7 +372,12 @@ describe("EVE MCP server", () => {
       )
       .mockResolvedValueOnce(new Response("synthetic archive"));
     const readArchive = vi.fn<typeof readStaticArchive>((_path, metadata) =>
-      Promise.resolve({ ...data, ...metadata }),
+      Promise.resolve(
+        new SkillImport(directory, metadata).fromCatalog({
+          ...data,
+          ...metadata,
+        }),
+      ),
     );
     const options = {
       directory,
@@ -379,7 +385,7 @@ describe("EVE MCP server", () => {
       readArchive,
       now: () => Date.parse(checkedAt),
     };
-    await new StaticDataCache(options).initialize();
+    (await new StaticDataCache(options).initialize()).release();
     fetchImplementation.mockClear();
     readArchive.mockClear();
     const client = await connectedClient(

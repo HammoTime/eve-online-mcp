@@ -10,19 +10,33 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync, StatementSync } from "node:sqlite";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   StaticDataCache,
   defaultStaticDataDirectory,
   SDE_LATEST_URL,
 } from "../src/static-data.js";
-import { SkillStore } from "../src/skill-store.js";
+import { SkillImport, SkillStore } from "../src/skill-store.js";
 import { skillFixture } from "./skill-fixtures.js";
 
 const directories: string[] = [];
+const releases: (() => void)[] = [];
+const initialize = Reflect.get(StaticDataCache.prototype, "initialize");
+beforeEach(() => {
+  vi.spyOn(StaticDataCache.prototype, "initialize").mockImplementation(
+    async function (this: StaticDataCache, refresh) {
+      const result = await initialize.call(this, refresh);
+      releases.push(result.release);
+      return result;
+    },
+  );
+});
 afterEach(async () => {
   vi.restoreAllMocks();
+  releases.splice(0).forEach((release) => {
+    release();
+  });
   await Promise.all(
     directories
       .splice(0)
@@ -41,7 +55,13 @@ async function setup() {
         ReturnType<typeof skillFixture>,
         "schemaVersion" | "types"
       >,
-    ) => Promise.resolve({ ...skillFixture(), ...metadata }),
+    ) =>
+      Promise.resolve(
+        new SkillImport(directory, metadata).fromCatalog({
+          ...skillFixture(),
+          ...metadata,
+        }),
+      ),
   );
   const options = { directory, fetchImplementation: fetcher, now, readArchive };
   return {
@@ -85,7 +105,11 @@ async function legacy(directory: string) {
 }
 async function cacheFiles(directory: string) {
   return (await readdir(directory))
-    .filter((name) => !/^skills-v1\.sqlite-(wal|shm)$/.test(name))
+    .filter(
+      (name) =>
+        !/^skills-v1\.sqlite-(wal|shm)$/.test(name) &&
+        name !== "sde-archives-v1",
+    )
     .sort();
 }
 
@@ -97,7 +121,10 @@ describe("official static data cache", () => {
       cache.initialize(),
       cache.initialize(),
     ]);
-    expect(first).toEqual(concurrent);
+    expect(first.status).toEqual(concurrent.status);
+    expect(first.catalog).not.toBe(concurrent.catalog);
+    first.release();
+    expect(concurrent.catalog.resolve("Mining").status).toBe("resolved");
     expect(first.status).toMatchObject({
       buildNumber: 123,
       stale: false,
@@ -114,8 +141,8 @@ describe("official static data cache", () => {
         redirect: "error",
         headers: { "User-Agent": expect.any(String) },
       });
-    expect(new SkillStore(directory).read()?.catalog.data).toEqual(
-      first.catalog.data,
+    expect(new SkillStore(directory).read()?.metadata).toEqual(
+      first.catalog.metadata,
     );
     expect((await new StaticDataCache(options).initialize()).status).toEqual(
       first.status,
@@ -199,9 +226,7 @@ describe("official static data cache", () => {
       buildNumber: 123,
       stale: true,
     });
-    expect(new SkillStore(directory).read()?.catalog.data.buildNumber).toBe(
-      123,
-    );
+    expect(new SkillStore(directory).read()?.metadata.buildNumber).toBe(123);
     expect(await cacheFiles(directory)).toEqual(["skills-v1.sqlite"]);
   });
   it("imports validated legacy data once, preserving legacy files and using SQLite after restart", async () => {
@@ -230,8 +255,20 @@ describe("official static data cache", () => {
   it("retries a failed first publication from the network, never from legacy in an initialized empty database", async () => {
     const { cache, fetcher, directory, options } = await setup();
     const text = await legacy(directory);
-    vi.spyOn(StatementSync.prototype, "run").mockImplementationOnce(() => {
-      throw new Error("synthetic INSERT failure");
+    const prepare = Reflect.get(DatabaseSync.prototype, "prepare");
+    let failed = false;
+    vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementation(function (
+      this: DatabaseSync,
+      sql,
+    ) {
+      const statement = prepare.call(this, sql);
+      if (!failed && sql.startsWith("INSERT OR REPLACE INTO skill_catalog")) {
+        failed = true;
+        vi.spyOn(statement, "run").mockImplementationOnce(() => {
+          throw new Error("synthetic INSERT failure");
+        });
+      }
+      return statement;
     });
     await expect(cache.initialize()).rejects.toThrow("unavailable");
     const store = new SkillStore(directory);
@@ -250,7 +287,7 @@ describe("official static data cache", () => {
     expect(fetcher.mock.calls[1]?.[1]?.headers).not.toHaveProperty(
       "If-None-Match",
     );
-    expect(store.read()?.catalog.data.buildNumber).toBe(124);
+    expect(store.read()?.metadata.buildNumber).toBe(124);
     expect(await readFile(join(directory, "catalog-v1.json"), "utf8")).toBe(
       text,
     );
@@ -310,23 +347,23 @@ describe("official static data cache", () => {
       const text = await legacy(directory);
       fetcher.mockResolvedValueOnce(manifest());
       await cache.initialize(true);
+      releases.splice(0).forEach((release) => {
+        release();
+      });
       const index = join(directory, "skills-v1.sqlite");
       if (failure === "corrupt") await writeFile(index, "not a database");
       else {
         const db = new DatabaseSync(index);
         try {
-          if (failure === "future") db.exec("PRAGMA user_version=2");
+          if (failure === "future") db.exec("PRAGMA user_version=3");
           else if (failure === "unversioned") db.exec("PRAGMA user_version=0");
           else if (failure === "incomplete")
             db.exec("DROP TABLE skill_catalog");
           else if (failure === "oversized")
             db.exec(
-              "UPDATE skill_catalog SET catalog_json = CAST(zeroblob(40000001) AS TEXT)",
+              "UPDATE skill_catalog SET etag = CAST(zeroblob(40000001) AS TEXT)",
             );
-          else
-            db.exec(
-              "UPDATE skill_catalog SET catalog_json = replace(catalog_json, 'Mining', 'Corrupted')",
-            );
+          else db.exec("UPDATE skill_catalog SET sha256 = 'invalid'");
         } finally {
           db.close();
         }
@@ -344,11 +381,12 @@ describe("official static data cache", () => {
     },
   );
   it.each(["304", "same build", "new build"])(
-    "preserves last-good data and checkedAt after a publication failure (%s)",
+    "fails honestly when the backing database is removed (%s)",
     async (response) => {
       const { cache, fetcher, directory, now } = await setup();
       download(fetcher);
       const first = await cache.initialize();
+      first.release();
       const index = join(directory, "skills-v1.sqlite");
       await rm(index);
       await mkdir(index);
@@ -358,29 +396,18 @@ describe("official static data cache", () => {
       else if (response === "same build")
         fetcher.mockResolvedValueOnce(manifest());
       else download(fetcher, 124);
-      const result = await cache.initialize(true);
-      expect(result.catalog).toBe(first.catalog);
-      expect(result.status).toMatchObject({
-        buildNumber: 123,
-        checkedAt: first.status.checkedAt,
-        stale: true,
-        warning: expect.any(String),
-      });
-      expect(String(result.status.warning)).not.toContain(directory);
+      await expect(cache.initialize(true)).rejects.toThrow("unavailable");
       expect(await cacheFiles(directory)).toEqual(["skills-v1.sqlite"]);
     },
   );
-  it("handles an invalid cache directory without losing a previously loaded build", async () => {
+  it("fails honestly when the cache directory becomes invalid", async () => {
     const { cache, fetcher, directory, options } = await setup();
     download(fetcher);
     const first = await cache.initialize();
+    first.release();
     await rm(directory, { recursive: true });
     await writeFile(directory, "invalid directory");
-    expect((await cache.initialize(true)).status).toMatchObject({
-      stale: true,
-      checkedAt: first.status.checkedAt,
-      buildNumber: 123,
-    });
+    await expect(cache.initialize(true)).rejects.toThrow("unavailable");
     await expect(new StaticDataCache(options).initialize()).rejects.toThrow(
       "unavailable",
     );
@@ -390,19 +417,17 @@ describe("official static data cache", () => {
     const { cache, fetcher, directory, readArchive } = await setup();
     download(fetcher);
     const first = await cache.initialize();
+    first.release();
     download(fetcher, 124);
     readArchive.mockImplementationOnce(async (_path, metadata) => {
       await rm(directory, { recursive: true });
       await writeFile(directory, "invalid directory");
-      return { ...skillFixture(), ...metadata };
+      return new SkillImport(directory, metadata).fromCatalog({
+        ...skillFixture(),
+        ...metadata,
+      });
     });
-    const result = await cache.initialize(true);
-    expect(result.catalog).toBe(first.catalog);
-    expect(result.status).toMatchObject({
-      stale: true,
-      checkedAt: first.status.checkedAt,
-    });
-    expect(String(result.status.warning)).not.toContain(directory);
+    await expect(cache.initialize(true)).rejects.toThrow("unavailable");
   });
   it.each(["304", "same build", "old download"])(
     "fences a stale process behind a newer publisher (%s)",
@@ -427,7 +452,10 @@ describe("official static data cache", () => {
         readArchive.mockImplementationOnce(async (_path, metadata) => {
           started?.();
           await pending;
-          return { ...skillFixture(), ...metadata };
+          return new SkillImport(directory, metadata).fromCatalog({
+            ...skillFixture(),
+            ...metadata,
+          });
         });
       } else {
         fetcher.mockImplementationOnce(async () => {
@@ -450,9 +478,7 @@ describe("official static data cache", () => {
         checkedAt: winner.status.checkedAt,
         stale: true,
       });
-      expect(new SkillStore(directory).read()?.catalog.data.buildNumber).toBe(
-        125,
-      );
+      expect(new SkillStore(directory).read()?.metadata.buildNumber).toBe(125);
       expect((await new StaticDataCache(options).initialize()).status).toEqual(
         winner.status,
       );
@@ -533,12 +559,25 @@ describe("official static data cache", () => {
     await expect(
       new StaticDataCache({ ...options, maxArchiveBytes: 4 }).initialize(),
     ).rejects.toThrow("download or validation failed");
-    expect(await readdir(directory)).toEqual([]);
+    expect(new SkillStore(directory).exists()).toBe(false);
+    expect(
+      (await readdir(directory)).filter((name) =>
+        name.startsWith("skills-import"),
+      ),
+    ).toEqual([]);
   });
   it("uses trusted archive metadata and rejects a structurally invalid parsed archive", async () => {
     const { cache, fetcher, readArchive } = await setup();
     download(fetcher);
-    readArchive.mockResolvedValueOnce({ ...skillFixture(), types: [] });
+    readArchive.mockImplementationOnce(async (_path, metadata) => {
+      const stage = new SkillImport((await setup()).directory, metadata);
+      try {
+        return stage.fromCatalog({ ...skillFixture(), types: [] });
+      } catch (error) {
+        stage.dispose();
+        throw error;
+      }
+    });
     await expect(cache.initialize()).rejects.toThrow("validation failed");
     expect(readArchive).toHaveBeenCalledWith(
       expect.any(String),

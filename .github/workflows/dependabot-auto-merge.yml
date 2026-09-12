@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for attempt in {1..120}; do
+          for _attempt in {1..120}; do
             state="$(gh pr view "$PULL_REQUEST_URL" --json state --jq '.state')"
             if [ "$state" = "MERGED" ]; then
               gh workflow run release.yml --ref main

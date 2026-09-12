@@ -25,6 +25,14 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 
 ESI cache headers are respected in memory, protected cache entries are isolated by credential context, and every response reports fetch/serve/expiry timestamps plus defensive page metadata. Errors include stable codes, retryability, Retry-After guidance, and a suggested action. Individual responses and bounded composite workflows use 5 MB safety ceilings. A descriptive User-Agent is sent as [recommended by ESI](https://developers.eveonline.com/docs/services/esi/best-practices/); it is derived from the installed package version and has the form `eve-online-mcp/<version> (adam@hammo.dev; +https://github.com/HammoTime/eve-online-mcp)`.
 
+The response cache is bounded to 128 entries and 20,000,000 serialized UTF-8
+bytes, with expiry eviction. Identical concurrent GETs share a credential-isolated
+request after each caller is authorized; POSTs do not. There are at most 64 tracked
+wire requests with 64 waiters each, and a 30-second wire/body deadline. Each waiter
+can cancel independently, including with telemetry disabled. Cancellation does not
+interrupt refresh-token persistence. Protected pagination preserves an explicit
+acting character even when served from cache.
+
 ## Development container
 
 All project commands are intended to run in [the devcontainer](.devcontainer/devcontainer.json). In VS Code, choose **Dev Containers: Reopen in Container**. The container installs the locked dependencies automatically.
@@ -197,15 +205,15 @@ esi-wallet.read_corporation_wallets.v1
 
 Optional settings:
 
-| Variable                 | Purpose                                                   |
-| ------------------------ | --------------------------------------------------------- |
-| `ESI_USER_AGENT`         | Optional override for a downstream app's identity/contact |
-| `ESI_MAX_RESPONSE_BYTES` | Overrides the 5,000,000-byte response ceiling             |
-| `ESI_OPENAPI_PATH`       | Loads a different local OpenAPI document for development  |
-| `EVE_CREDENTIALS_PATH`   | Overrides the OS credential file location                 |
-| `EVE_DISABLE_AUTO_SSO`   | Set to `1` to prevent browser login on protected calls    |
-| `EVE_SSO_REDIRECT_URI`   | Overrides the localhost callback for a custom application |
-| `EVE_SDE_CACHE_DIR`      | Overrides the local CCP static-data cache directory       |
+| Variable                 | Purpose                                                                                             |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `ESI_USER_AGENT`         | Optional override for a downstream app's identity/contact                                           |
+| `ESI_MAX_RESPONSE_BYTES` | Positive finite integer overriding the 5,000,000-byte response ceiling; invalid values fail startup |
+| `ESI_OPENAPI_PATH`       | Loads a different local OpenAPI document for development                                            |
+| `EVE_CREDENTIALS_PATH`   | Overrides the OS credential file location                                                           |
+| `EVE_DISABLE_AUTO_SSO`   | Set to `1` to prevent browser login on protected calls                                              |
+| `EVE_SSO_REDIRECT_URI`   | Overrides the localhost callback for a custom application                                           |
+| `EVE_SDE_CACHE_DIR`      | Overrides the local CCP static-data cache directory                                                 |
 
 Do not commit tokens or client secrets. Tool responses never include the token, and callers cannot override the ESI origin or inject arbitrary headers.
 
@@ -250,7 +258,7 @@ enough. No ESI system/gate lookup sequence or character login is needed:
 
 ### Character skill training plans
 
-The executable planner supports published skills and ship hulls from CCP's [official JSONL SDE](https://developers.eveonline.com/docs/services/static-data/). On first startup it downloads the archive in the background; planning waits for initialization. The archive is roughly 95 MB at the previously verified build and can change in size. The public cache uses `skills-v1.sqlite` for the validated skill/ship catalog and `maps-v1.sqlite` for indexed map projections. New archive downloads are temporary and removed after parsing/publication. No character snapshots, credentials, private ESI responses, or map annotations are written to either database.
+The executable planner supports published skills and ship hulls from CCP's [official JSONL SDE](https://developers.eveonline.com/docs/services/static-data/). On first startup it downloads the archive in the background; planning waits for initialization. The archive is roughly 95 MB at the previously verified build and can change in size. The public cache uses normalized `skills-v1.sqlite` tables and indexed `maps-v1.sqlite` projections. SQLite is the runtime data source, not a container for a full in-memory skill catalog. Skills and maps share a bounded, persistent archive cache for their independent imports. No character snapshots, credentials, private ESI responses, or map annotations are written to these databases.
 
 Defaults are `%LOCALAPPDATA%\eve-online-mcp\sde` on Windows, `~/Library/Caches/eve-online-mcp/sde` on macOS, and `$XDG_CACHE_HOME/eve-online-mcp/sde` or `~/.cache/eve-online-mcp/sde` on Linux. Set `EVE_SDE_CACHE_DIR` in the MCP server environment for a different location. In a container this is a container path: mount a persistent volume there to retain data between runs.
 
@@ -260,8 +268,10 @@ Existing checksum-validated JSON caches migrate automatically when the correspon
 database is absent. Legacy files remain untouched, and an existing corrupt or
 unsupported database never silently falls back to older JSON. Maps read only the
 selected geography and touching connections from one SQLite snapshot; normal map
-requests do not deserialize the whole universe. Skill planning still loads its
-validated catalog into memory. See [local storage](docs/local-storage.md) for
+requests do not deserialize the whole universe. Skills resolve names and read
+only required type/prerequisite rows from a request-scoped snapshot. Existing
+0.8.0 skill databases migrate transactionally to the normalized schema in place.
+See [local storage](docs/local-storage.md) for
 migration, recovery, concurrency, and performance limits.
 
 Example MCP tool arguments (replace `42` with the intended, verified character ID):
@@ -369,5 +379,13 @@ Publishing to npmjs uses npm trusted publishing through GitHub OIDC and produces
 ## Test suite
 
 Vitest covers catalog filtering, local `$ref` resolution, safe URL and header construction, schema validation, OAuth refresh and scopes, caching, response limits, error handling, schema diffing, and end-to-end MCP tool/resource/prompt calls over an in-memory transport. Coverage gates require at least 80% for statements, lines, functions, and branches. GitHub CI executes the same `npm run validate` command inside the devcontainer image.
+
+CI then packs that validated build and checks the installed package on Linux,
+Windows and macOS with Node 22.13.0, plus Linux with Node 26.8.1. These native jobs
+do not build source: they install only the tarball/runtime dependencies with
+install scripts disabled, then block network/browser calls during the stdio,
+SQLite-restart, skill-query and PNG/SVG smoke. The existing required `validate`
+check waits for the full matrix. These checks do not benchmark the real SDE or
+certify network filesystems.
 
 Licensed under the [GNU AGPL v3](LICENSE).

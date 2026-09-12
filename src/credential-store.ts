@@ -19,6 +19,7 @@ const legacySchema = z
     refreshToken: z.string().min(1),
     scopes: z.array(z.string()),
     createdAt: z.string().min(1),
+    generation: z.uuid().optional(),
   })
   .strict();
 const characterSchema = legacySchema
@@ -53,6 +54,25 @@ export type StoredCredential = z.infer<typeof legacySchema>;
 export type CharacterCredential = z.infer<typeof characterSchema>;
 export type CredentialFile = z.infer<typeof fileSchema>;
 
+export function sameCredential(
+  left: StoredCredential | undefined,
+  right: StoredCredential,
+): boolean {
+  return (
+    left !== undefined &&
+    right.generation !== undefined &&
+    left.generation === right.generation &&
+    left.clientId === right.clientId &&
+    left.refreshToken === right.refreshToken &&
+    left.createdAt === right.createdAt &&
+    JSON.stringify(left.scopes) === JSON.stringify(right.scopes) &&
+    ("characterId" in left ? left.characterId : undefined) ===
+      ("characterId" in right ? right.characterId : undefined) &&
+    ("characterName" in left ? left.characterName : undefined) ===
+      ("characterName" in right ? right.characterName : undefined)
+  );
+}
+
 export function defaultCredentialPath(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -72,6 +92,10 @@ export class CredentialStore {
   constructor(readonly path = defaultCredentialPath()) {}
 
   async read(): Promise<CredentialFile> {
+    return this.lock(".lock", () => this.readLocked());
+  }
+
+  private async readLocked(): Promise<CredentialFile> {
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
@@ -80,17 +104,29 @@ export class CredentialStore {
       throw error;
     }
     // Never include parser diagnostics: they can quote credential contents.
+    let file: CredentialFile;
     try {
       const value: unknown = JSON.parse(raw);
       const legacy = legacySchema.safeParse(value);
-      if (legacy.success)
-        return { version: 2, characters: [], legacyCredential: legacy.data };
-      return fileSchema.parse(value);
+      file = legacy.success
+        ? { version: 2, characters: [], legacyCredential: legacy.data }
+        : fileSchema.parse(value);
     } catch {
       throw new Error(
         "Invalid EVE credential file; repair it or log out before signing in again.",
       );
     }
+    // Upgrade shipped unversioned/v2 credentials once, under the store lock.
+    // Timestamps and refresh-token equality cannot fence logout/reconnect ABA.
+    let migrated = false;
+    for (const credential of [file.legacyCredential, ...file.characters]) {
+      if (credential && !credential.generation) {
+        credential.generation = randomUUID();
+        migrated = true;
+      }
+    }
+    if (migrated) await this.persist(file);
+    return file;
   }
 
   async withRefreshLock<T>(
@@ -104,7 +140,7 @@ export class CredentialStore {
     const parsed = characterSchema.safeParse(credential);
     if (!parsed.success) throw new Error("Invalid EVE character credential.");
     await this.update((file) => {
-      this.upsert(file, parsed.data);
+      this.upsert(file, { ...parsed.data, generation: randomUUID() });
     });
   }
 
@@ -112,35 +148,55 @@ export class CredentialStore {
     previous: StoredCredential,
     credential: CharacterCredential,
   ): Promise<void> {
-    await this.update((file) => {
-      if (file.legacyCredential?.refreshToken !== previous.refreshToken) return;
+    const superseded = await this.update((file) => {
+      if (!sameCredential(file.legacyCredential, previous))
+        throw new Error(
+          "EVE credential changed during refresh; retry the operation.",
+        );
       // A newer explicit login for this character takes precedence.
-      if (
-        !file.characters.some(
-          (entry) => entry.characterId === credential.characterId,
-        )
-      )
-        this.upsert(file, credential);
+      const exists = file.characters.some(
+        (entry) => entry.characterId === credential.characterId,
+      );
+      if (!exists)
+        this.upsert(file, { ...credential, generation: randomUUID() });
       delete file.legacyCredential;
+      return exists;
     });
+    // Persist retirement before rejecting the stale call so the next call can
+    // use the newer login instead of repeatedly attempting the old credential.
+    if (superseded)
+      throw new Error(
+        "EVE credential changed during refresh; retry the operation.",
+      );
   }
 
   async rotate(
     previous: CharacterCredential,
     refreshToken: string,
-  ): Promise<void> {
-    await this.update((file) => {
+  ): Promise<CharacterCredential> {
+    return this.update((file) => {
       const current = file.characters.find(
         (entry) => entry.characterId === previous.characterId,
       );
-      if (
-        current?.refreshToken !== previous.refreshToken ||
-        current.clientId !== previous.clientId
-      )
+      if (!current || !sameCredential(current, previous))
         throw new Error(
-          `Credential for character ${previous.characterId} changed during refresh; retry the operation.`,
+          "EVE credential changed during refresh; retry the operation.",
         );
       current.refreshToken = refreshToken;
+      current.generation = randomUUID();
+      return current;
+    });
+  }
+
+  async assertCurrent(previous: CharacterCredential): Promise<void> {
+    await this.lock(".lock", async () => {
+      const current = (await this.readLocked()).characters.find(
+        (entry) => entry.characterId === previous.characterId,
+      );
+      if (!sameCredential(current, previous))
+        throw new Error(
+          "EVE credential changed during refresh; retry the operation.",
+        );
     });
   }
 
@@ -163,7 +219,7 @@ export class CredentialStore {
           throw error;
         }
       }
-      const file = await this.read();
+      const file = await this.readLocked();
       const count = file.characters.length;
       file.characters = file.characters.filter(
         (entry) => entry.characterId !== characterId,
@@ -183,11 +239,14 @@ export class CredentialStore {
     file.characters.push(credential);
   }
 
-  private async update(action: (file: CredentialFile) => void): Promise<void> {
-    await this.lock(".lock", async () => {
-      const file = await this.read();
-      action(file);
+  private async update<T>(
+    action: (file: CredentialFile) => T | Promise<T>,
+  ): Promise<T> {
+    return this.lock(".lock", async () => {
+      const file = await this.readLocked();
+      const result = await action(file);
       await this.persist(file);
+      return result;
     });
   }
 
