@@ -54,25 +54,36 @@ const interactive =
 const authentication = new CharacterAuthentication(store, interactive);
 const staticData = new StaticDataCache();
 // Keep the MCP handshake responsive during the first download. Planning awaits this initialization.
-void staticData.initialize().catch(() => {
-  console.error(
-    "eve-online-mcp: static data initialization failed; retry initialize_static_data.",
-  );
-});
+void staticData
+  .initialize()
+  .then((snapshot) => {
+    snapshot.release();
+  })
+  .catch(() => {
+    console.error(
+      "eve-online-mcp: static data initialization failed; retry initialize_static_data.",
+    );
+  });
 
 const telemetry = await localTelemetry();
 const factory = () =>
   createEveServer(catalog, client, authentication, staticData);
 const start = () =>
-  serveStdio(() => (telemetry ? telemetry.run(factory) : factory()), {
+  serveStdio(() => telemetry.run(factory), {
     onerror: () => {
       console.error("eve-online-mcp: MCP transport error");
     },
   });
-const handle = telemetry ? telemetry.run(start) : start();
+let handle: ReturnType<typeof start>;
+try {
+  handle = telemetry.run(start);
+} catch (error) {
+  await telemetry.close();
+  throw error;
+}
 let closing: Promise<void> | undefined;
 const close = () =>
-  (closing ??= handle.close().finally(() => telemetry?.close()));
+  (closing ??= handle.close().finally(() => telemetry.close()));
 process.stdin.once("end", () => {
   void close();
 });

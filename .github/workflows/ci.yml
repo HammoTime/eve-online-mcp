@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  build:
+    name: Required Linux devcontainer validation and package build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,3 +27,76 @@ jobs:
           -w /workspace
           eve-online-mcp-dev
           sh -lc "npm ci && npm run validate"
+      - name: Pack validated build and prepare runtime acceptance artifact
+        run: |
+          mkdir "$RUNNER_TEMP/package-acceptance"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -v "$PWD:/workspace" \
+            -v "$RUNNER_TEMP/package-acceptance:/artifact" \
+            -w /workspace \
+            eve-online-mcp-dev \
+            sh -lc "npm pack --dry-run && node scripts/smoke-package.mjs prepare /artifact"
+      - name: Upload only the npm tarball, expected build identity and smoke script
+        uses: actions/upload-artifact@v7
+        with:
+          name: package-acceptance
+          path: ${{ runner.temp }}/package-acceptance/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Native acceptance of the Linux-built npm package, not source builds or a
+  # replacement for the required devcontainer lint/typecheck/test/build gates.
+  package-runtime:
+    name: Package runtime / ${{ matrix.os }} / Node ${{ matrix.node }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: "22.13.0"
+          - os: windows-latest
+            node: "22.13.0"
+          - os: macos-latest
+            node: "22.13.0"
+          - os: ubuntu-latest
+            node: "26.8.1"
+    steps:
+      # Deliberately no checkout, npm ci, transpiler or source tests here.
+      - uses: actions/download-artifact@v8
+        with:
+          name: package-acceptance
+          path: ${{ runner.temp }}/package-acceptance
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: Install only the packed package and public runtime dependencies
+        shell: bash
+        env:
+          ARTIFACT: ${{ runner.temp }}/package-acceptance
+          PREFIX: ${{ runner.temp }}/package-runtime
+        run: node "$ARTIFACT/smoke-package.mjs" install "$ARTIFACT" "$PREFIX"
+      - name: Accept compiled stdio package with network and browser calls blocked
+        shell: bash
+        env:
+          ARTIFACT: ${{ runner.temp }}/package-acceptance
+          PREFIX: ${{ runner.temp }}/package-runtime
+          EXPECTED_NODE: ${{ matrix.node }}
+        run: node "$ARTIFACT/smoke-package.mjs" run "$ARTIFACT" "$PREFIX" "$EXPECTED_NODE"
+
+  # Preserve the protected branch's existing check name and gate on every OS.
+  validate:
+    if: always()
+    needs: [build, package-runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require build and every package runtime
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          RUNTIME_RESULT: ${{ needs.package-runtime.result }}
+        run: test "$BUILD_RESULT" = success && test "$RUNTIME_RESULT" = success

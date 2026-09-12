@@ -41,7 +41,7 @@ describe("CredentialStore", () => {
     await store.write(credential);
     await expect(store.read()).resolves.toEqual({
       version: 2,
-      characters: [credential],
+      characters: [{ ...credential, generation: expect.any(String) }],
     });
     expect((await stat(store.path)).mode & 0o777).toBe(0o600);
     expect(await readFile(store.path, "utf8")).not.toContain("accessToken");
@@ -64,8 +64,12 @@ describe("CredentialStore", () => {
       ),
     );
     await store.select(43);
+    const previous = (await store.read()).characters.find(
+      (entry) => entry.characterId === 42,
+    );
+    if (!previous) throw new Error("Missing fixture credential");
     await Promise.all([
-      store.rotate(testCredential(42), "fake-replacement"),
+      store.rotate(previous, "fake-replacement"),
       store.remove(44),
     ]);
     expect(
@@ -76,9 +80,9 @@ describe("CredentialStore", () => {
     expect((await store.read()).defaultCharacterId).toBeUndefined();
     await expect(store.remove(999)).resolves.toBe(false);
     await expect(store.select(999)).rejects.toThrow("No saved authorization");
-    await expect(
-      store.rotate(testCredential(42), "stale-replacement"),
-    ).rejects.toThrow("changed during refresh");
+    await expect(store.rotate(previous, "stale-replacement")).rejects.toThrow(
+      "changed during refresh",
+    );
     await store.write({
       ...testCredential(42),
       refreshToken: "fake-new-login",
@@ -97,13 +101,111 @@ describe("CredentialStore", () => {
     };
     await writeFile(store.path, JSON.stringify(legacy));
     await store.write(testCredential(43));
-    expect((await store.read()).legacyCredential).toEqual(legacy);
-    await store.migrateLegacy(legacy, credential);
+    const saved = (await store.read()).legacyCredential;
+    expect(saved).toEqual({ ...legacy, generation: expect.any(String) });
+    if (!saved) throw new Error("Missing fixture credential");
+    await store.migrateLegacy(saved, credential);
     expect((await store.read()).characters).toHaveLength(2);
     expect((await store.read()).legacyCredential).toBeUndefined();
-    await store.migrateLegacy(legacy, testCredential(99));
+    await expect(
+      store.migrateLegacy(saved, testCredential(99)),
+    ).rejects.toThrow("changed during refresh");
     expect((await store.read()).characters).toHaveLength(2);
   });
+
+  it("migrates shipped v2 generations once across concurrent store readers", async () => {
+    const store = await temporaryStore();
+    await store.write(credential);
+    await writeFile(
+      store.path,
+      JSON.stringify({
+        version: 2,
+        characters: [credential, testCredential(43)],
+        defaultCharacterId: 42,
+      }),
+    );
+    const files = await Promise.all([
+      store.read(),
+      new CredentialStore(store.path).read(),
+    ]);
+    expect(files[0]).toEqual(files[1]);
+    expect(files[0].defaultCharacterId).toBe(42);
+    const generations = files[0].characters.map((entry) => entry.generation);
+    expect(generations).toEqual([expect.any(String), expect.any(String)]);
+    expect(new Set(generations).size).toBe(2);
+    expect(await store.read()).toEqual(files[0]);
+    expect(JSON.parse(await readFile(store.path, "utf8"))).toEqual(files[0]);
+    expect((await stat(store.path)).mode & 0o777).toBe(0o600);
+  });
+
+  it.each(["logout", "reconnect", "legacy-replacement"] as const)(
+    "does not revive or overwrite a legacy credential after %s",
+    async (change) => {
+      const store = await temporaryStore();
+      await store.write(credential);
+      const { clientId, refreshToken, scopes, createdAt } = credential;
+      const legacy = { clientId, refreshToken, scopes, createdAt };
+      await writeFile(store.path, JSON.stringify(legacy));
+      const previous = (await store.read()).legacyCredential;
+      if (!previous) throw new Error("Missing fixture credential");
+      if (change === "logout") await store.remove();
+      if (change === "reconnect") await store.write(credential);
+      if (change === "legacy-replacement")
+        await writeFile(store.path, JSON.stringify(legacy));
+      const current = await store.read();
+      await expect(store.migrateLegacy(previous, credential)).rejects.toThrow(
+        "changed during refresh",
+      );
+      if (change === "reconnect") delete current.legacyCredential;
+      expect(await store.read()).toEqual(current);
+    },
+  );
+
+  it("fences identical reconnects, even if a caller reuses the old generation", async () => {
+    const store = await temporaryStore();
+    await store.write(credential);
+    const previous = (await store.read()).characters[0];
+    if (!previous) throw new Error("Missing fixture credential");
+    await store.assertCurrent(previous);
+    await store.remove();
+    await store.write(previous);
+    const current = (await store.read()).characters[0];
+    expect(current?.generation).not.toBe(previous.generation);
+    await expect(store.assertCurrent(previous)).rejects.toThrow(
+      "changed during refresh",
+    );
+    await expect(store.rotate(previous, "fake-stale")).rejects.toThrow(
+      "changed during refresh",
+    );
+    expect((await store.read()).characters[0]).toEqual(current);
+  });
+
+  it.each([
+    { clientId: "other-test-client" },
+    { characterId: 43 },
+    { characterName: "Other test name" },
+    { scopes: [] },
+    { createdAt: "other-test-date" },
+    { refreshToken: "fake-other-refresh" },
+  ])(
+    "rejects metadata changes even with an unchanged generation: %j",
+    async (change) => {
+      const store = await temporaryStore();
+      await store.write(credential);
+      const file = await store.read();
+      const previous = file.characters[0];
+      if (!previous) throw new Error("Missing fixture credential");
+      file.characters[0] = { ...previous, ...change };
+      await writeFile(store.path, JSON.stringify(file));
+      await expect(store.assertCurrent(previous)).rejects.toThrow(
+        "changed during refresh",
+      );
+      await expect(store.rotate(previous, "fake-stale")).rejects.toThrow(
+        "changed during refresh",
+      );
+      expect(await store.read()).toEqual(file);
+    },
+  );
 
   it.each([
     { version: 2, characters: [credential, credential] },

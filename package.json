@@ -32,7 +32,7 @@
     "dev": "tsx src/index.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern scripts/smoke-package.mjs && node --check scripts/smoke-package.mjs",
     "prepack": "npm run build",
     "schema:check": "tsx scripts/check-openapi-update.ts",
     "schema:update": "tsx scripts/update-openapi.ts",

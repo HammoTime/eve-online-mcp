@@ -127,11 +127,13 @@ jobs:
           fi
 
           echo "Publishing missing registry copies for ${tag_name}."
-          echo "should_publish=true" >> "$GITHUB_OUTPUT"
-          echo "publish_npmjs=${publish_npmjs}" >> "$GITHUB_OUTPUT"
-          echo "publish_github_packages=${publish_github_packages}" >> "$GITHUB_OUTPUT"
-          echo "tag_name=${tag_name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          {
+            echo "should_publish=true"
+            echo "publish_npmjs=${publish_npmjs}"
+            echo "publish_github_packages=${publish_github_packages}"
+            echo "tag_name=${tag_name}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
 
   package:
     needs: [release, publish-plan]

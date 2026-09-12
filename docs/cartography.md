@@ -147,7 +147,8 @@ the SDE or load the native rasterizer. No hosted deployment is part of this chan
 Map SDE initializes lazily, checks the fixed CCP manifest at five-minute intervals,
 and uses `maps-v1.sqlite` in the existing SDE directory (`EVE_SDE_CACHE_DIR`
 override). It initially downloads the official ZIP independently of the skill cache;
-new downloads are temporary rather than accumulating archived builds. Existing
+downloads reuse a shared, bounded two-slot archive cache rather than accumulating
+archived builds or downloading again for skills. Existing
 `map-catalog-v1.json` migrates only after its checksum, build identity, complete graph,
 and matching build-and-digest ZIP are validated. Legacy files are left untouched.
 

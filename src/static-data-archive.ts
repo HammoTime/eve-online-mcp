@@ -1,9 +1,10 @@
 import { openPromise } from "yauzl";
 import type { Readable } from "node:stream";
+import { dirname } from "node:path";
 import type { StaticCatalog } from "./skill-data.js";
+import { SkillImport } from "./skill-store.js";
 import {
   jsonLines,
-  parseStaticData,
   STATIC_DATA_FILES,
   type StaticDataEntry,
 } from "../lib/src/static-data-parser.js";
@@ -17,7 +18,12 @@ async function* staticEntries(path: string): AsyncGenerator<StaticDataEntry> {
     validateEntrySizes: true,
   });
   try {
+    if (zip.entryCount > 10_000)
+      throw new Error("SDE archive entry count exceeds limit");
+    let count = 0;
     for await (const entry of zip.eachEntry()) {
+      if (++count > 10_000)
+        throw new Error("SDE archive entry count exceeds limit");
       if (!STATIC_DATA_FILES.includes(entry.fileName)) continue;
       if (entry.uncompressedSize > 512_000_000)
         throw new Error("SDE archive entry exceeds byte limit");
@@ -33,9 +39,15 @@ async function* staticEntries(path: string): AsyncGenerator<StaticDataEntry> {
   }
 }
 
-export function readStaticArchive(
+export async function readStaticArchive(
   path: string,
   metadata: Omit<StaticCatalog, "schemaVersion" | "types">,
-): Promise<StaticCatalog> {
-  return parseStaticData(staticEntries(path), metadata);
+): Promise<SkillImport> {
+  const stage = new SkillImport(dirname(path), metadata);
+  try {
+    return await stage.import(staticEntries(path));
+  } catch (error) {
+    stage.dispose();
+    throw error;
+  }
 }

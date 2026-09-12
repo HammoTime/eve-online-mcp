@@ -17,6 +17,60 @@ import { diagnostic } from "../lib/src/telemetry.js";
 import { PACKAGE_VERSION } from "./package-metadata.js";
 import type { ReplayManifest } from "../lib/src/diagnostics.js";
 
+let ownedContext:
+  { manager: AsyncLocalStorageContextManager; users: number } | undefined;
+
+function acquireRequestContext(): () => void {
+  const probe = context.active().setValue(Symbol(), true);
+  const isGlobal = (manager: AsyncLocalStorageContextManager) =>
+    manager.with(probe, () => context.active() === probe);
+  let owned = ownedContext;
+  if (!owned || !isGlobal(owned.manager)) {
+    // Respect an embedding application's manager; do not attempt a duplicate
+    // global registration (or unregister a manager we do not own).
+    if (context.with(probe, () => context.active() === probe))
+      return () => {
+        /* The embedding application owns this manager. */
+      };
+    const manager = new AsyncLocalStorageContextManager().enable();
+    if (!context.setGlobalContextManager(manager)) {
+      manager.disable();
+      return () => {
+        /* Registration did not transfer ownership. */
+      };
+    }
+    owned = { manager, users: 0 };
+    ownedContext = owned;
+  }
+  owned.users++;
+  const lease = owned;
+  return () => {
+    if (--lease.users !== 0) return;
+    if (isGlobal(lease.manager)) context.disable();
+    else lease.manager.disable();
+    if (ownedContext === lease) ownedContext = undefined;
+  };
+}
+
+export async function localTelemetry(env: NodeJS.ProcessEnv = process.env) {
+  const release = acquireRequestContext();
+  try {
+    const runtime = await exportingTelemetry(env);
+    let closing: Promise<void> | undefined;
+    return {
+      run: <T>(operation: () => T): T =>
+        runtime ? runtime.run(operation) : operation(),
+      close: () =>
+        (closing ??= Promise.resolve()
+          .then(() => runtime?.close())
+          .finally(release)),
+    };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
 export async function pruneLocalDiagnostics(
   directory: string,
   now = Date.now(),
@@ -44,11 +98,8 @@ export async function pruneLocalDiagnostics(
   }
 }
 
-export async function localTelemetry(env: NodeJS.ProcessEnv = process.env) {
+async function exportingTelemetry(env: NodeJS.ProcessEnv) {
   if (!env.OTEL_EXPORTER_OTLP_ENDPOINT) return undefined;
-  context.setGlobalContextManager(
-    new AsyncLocalStorageContextManager().enable(),
-  );
   let versions = {
     server: PACKAGE_VERSION,
     library: "development",
