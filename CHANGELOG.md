@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.8.0...v0.9.0) (2026-09-12)
+
+
+### Features
+
+* query SQLite skills and harden MCP calls ([#55](https://github.com/HammoTime/eve-online-mcp/issues/55)) ([ed88baf](https://github.com/HammoTime/eve-online-mcp/commit/ed88bafc6609ec39706c65b23a7aa6e92e8e018c))
+
 ## [0.8.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.7.0...v0.8.0) (2026-09-11)
 
 
