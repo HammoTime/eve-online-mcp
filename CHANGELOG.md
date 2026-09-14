@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.9.0...v0.9.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **deps:** bump node in /.devcontainer ([#57](https://github.com/HammoTime/eve-online-mcp/issues/57)) ([2c202c0](https://github.com/HammoTime/eve-online-mcp/commit/2c202c007a83c963e402d186451214b3866742f0))
+* update ESI schema cache metadata ([#60](https://github.com/HammoTime/eve-online-mcp/issues/60)) ([a85d597](https://github.com/HammoTime/eve-online-mcp/commit/a85d59701cef2de4051f84475b9e4b57ee03797c))
+
 ## [0.9.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.8.0...v0.9.0) (2026-09-12)
 
 
