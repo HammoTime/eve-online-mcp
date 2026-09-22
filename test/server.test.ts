@@ -190,7 +190,6 @@ describe("EVE MCP server", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "search_zkillmails",
       "get_zkillmail",
-      "initialize_static_data",
       "resolve_skill_plan_targets",
       "get_skill_dependencies",
       "generate_skill_plan",
@@ -210,8 +209,8 @@ describe("EVE MCP server", () => {
       tools.filter(
         (tool) => !["render_eve_map", "plan_eve_route"].includes(tool.name),
       ),
-    ).toHaveLength(15);
-    expect(tools).toHaveLength(17);
+    ).toHaveLength(14);
+    expect(tools).toHaveLength(16);
     for (const tool of tools) {
       expect(tool.outputSchema, tool.name).toMatchObject({ type: "object" });
     }
@@ -406,11 +405,11 @@ describe("EVE MCP server", () => {
     );
     await client.listTools();
     const result = await client.callTool({
-      name: "initialize_static_data",
-      arguments: {},
+      name: "resolve_skill_plan_targets",
+      arguments: { target: "Mining II" },
     });
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toHaveProperty("staticData", {
       buildNumber: data.buildNumber,
       releaseDate: data.releaseDate,
       sourceUrl: data.sourceUrl,
@@ -622,10 +621,10 @@ describe("EVE MCP server", () => {
   it("serves the public cache and dependency graph through MCP without SSO", async () => {
     const client = await connectedClient();
     const cache = await client.callTool({
-      name: "initialize_static_data",
-      arguments: { refresh: true },
+      name: "resolve_skill_plan_targets",
+      arguments: { target: "Mining II" },
     });
-    expect(cache.structuredContent).toMatchObject({
+    expect(cache.structuredContent).toHaveProperty("staticData", {
       buildNumber: 123,
       stale: false,
     });
@@ -724,7 +723,6 @@ describe("EVE MCP server", () => {
     );
     const client = await connectedClient(undefined, source);
     for (const name of [
-      "initialize_static_data",
       "resolve_skill_plan_targets",
       "get_skill_dependencies",
       "generate_skill_plan",
@@ -732,11 +730,9 @@ describe("EVE MCP server", () => {
       const result = await client.callTool({
         name,
         arguments:
-          name === "initialize_static_data"
-            ? {}
-            : name === "generate_skill_plan"
-              ? { characterId: 42, target: "Mining II" }
-              : { target: "Mining II" },
+          name === "generate_skill_plan"
+            ? { characterId: 42, target: "Mining II" }
+            : { target: "Mining II" },
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain(

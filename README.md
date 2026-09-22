@@ -16,7 +16,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
 - `search_zkillmails` searches public zKillboard killmails by character, corporation, alliance, ship or location, with kill/loss, time-window and space filters. No EVE login is required.
 - `get_zkillmail` retrieves one public zKillboard killmail by ID, including victim, attackers and `zkb` metadata. Both tools return bounded results with explicit freshness and incomplete-history warnings.
-- `initialize_static_data` downloads and validates CCP's official static data into a local cache, reports its build/freshness, and checks for updates on request. Startup also initializes in the background.
+- Skill tools automatically initialize CCP's official static data and report its build/freshness. Startup warms the local skill cache in the background.
 - `resolve_skill_plan_targets` resolves exact skill/ship names or type IDs against the cache, including explicit skill levels and unique singular skill names. Ambiguous or unresolved inputs return candidates.
 - `get_skill_dependencies` returns a public prerequisite graph with skill-level nodes and prerequisite-to-dependent edges, without login.
 - `generate_skill_plan` computes a personalized, dependency-checked plan from cached requirements and scoped character skills/queue, removes completed levels, and returns training text and estimated remaining SP.
@@ -41,7 +41,7 @@ acting character even when served from cache.
 Available from **0.10.0**, `search_zkillmails` and `get_zkillmail` work immediately
 after configuring the MCP server. No zKillboard API key or EVE login is needed.
 After upgrading an existing installation, restart or reconnect the MCP host to
-refresh its tool list; the server exposes 17 tools.
+refresh its tool list; the server exposes 16 tools.
 
 Ask your assistant: "Show public zKillboard killmails in Jita from the past 24
 hours." It should first resolve the system with `resolve_eve_entities`, then
@@ -139,7 +139,7 @@ codex mcp list
 
 The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
 
-All 17 tools advertise structured output schemas, matching the shared contracts
+All 16 tools advertise structured output schemas, matching the shared contracts
 used by the hosted server. Successful results retain their direct object shape,
 including explicit partial results and freshness; they are not wrapped in a
 `result` property. Refresh the host's tool listing after an upgrade.
@@ -162,6 +162,11 @@ Public ESI routes need no credentials and never trigger login. Ask Codex for a c
 Credentials are stored per character, not per EVE account. Both `call_esi` and `get_character_context` select the credential matching the requested `character_id`/`characterId`. A wrong-character browser selection saves nothing and reports the requested and selected IDs. Tokens with a different or unreadable character subject are rejected before making a protected character request. A remaining upstream 403 identifies the character and required scopes; ownership or corporation roles can still deny access even with the correct character.
 
 Codex can inspect saved authorizations using `list_eve_characters` and renew consent using `authorize_eve_character` when scopes are missing or a grant has expired or been revoked. For corporation, fleet, or structure operations without a character path parameter, a sole saved character is used automatically. With multiple saved characters and no default, the server asks Codex to use `select_eve_character` for the intended character. This default never overrides a character-specific request. Login dialogs are serialized, and simultaneous requests for the same missing character share a successful login.
+
+The selected default persists across sessions sharing the local credential file.
+Prefer `call_esi.actingCharacterId` for a single request. `get_character_context`
+returns permitted sections even when another requested section lacks a scope;
+blocked sections retain explicit errors.
 
 The versioned credential file lives in the user's OS configuration directory. Each entry stores a character ID/name, client ID, granted scopes, creation time, and refresh token. Access tokens stay in memory. Login and refresh validate EVE's signature, issuer, audiences, expiration, and character claims. Refresh-token rotation updates only the matching character; writes use a restricted-permission temporary file, atomic replacement, and locks to coordinate concurrent processes. Running servers reread the store to notice new consent or removal. Old single-credential files migrate on their next protected use after the character identity is verified; adding a new character before migration preserves the legacy credential.
 
@@ -313,7 +318,7 @@ The executable planner supports published skills and ship hulls from CCP's [offi
 
 Defaults are `%LOCALAPPDATA%\eve-online-mcp\sde` on Windows, `~/Library/Caches/eve-online-mcp/sde` on macOS, and `$XDG_CACHE_HOME/eve-online-mcp/sde` or `~/.cache/eve-online-mcp/sde` on Linux. Set `EVE_SDE_CACHE_DIR` in the MCP server environment for a different location. In a container this is a container path: mount a persistent volume there to retain data between runs.
 
-Each initialization checks CCP's latest-build manifest when the last successful check is at least five minutes old; `initialize_static_data` with `{"refresh":true}` checks immediately. Conditional ETag requests avoid unchanged downloads. SQLite transactions fence build publication and freshness updates so a slower older writer cannot replace a newer build. A failed refresh retains the last validated build with a stale warning rather than supplying empty requirements. Downloads use fixed CCP URLs, bounded streaming and selected ZIP entries, without extracting archive paths.
+Each initialization checks CCP's latest-build manifest when the last successful check is at least five minutes old; the operator command `eve-online-mcp static-data refresh` checks immediately and prints build/freshness status. Conditional ETag requests avoid unchanged downloads. SQLite transactions fence build publication and freshness updates so a slower older writer cannot replace a newer build. A failed refresh retains the last validated build with a stale warning rather than supplying empty requirements. Downloads use fixed CCP URLs, bounded streaming and selected ZIP entries, without extracting archive paths.
 
 Existing checksum-validated JSON caches migrate automatically when the corresponding
 database is absent. Legacy files remain untouched, and an existing corrupt or
@@ -328,7 +333,6 @@ migration, recovery, concurrency, and performance limits.
 Example MCP tool arguments (replace `42` with the intended, verified character ID):
 
 ```text
-initialize_static_data {}
 resolve_skill_plan_targets {"target":"exhumer"}
 get_skill_dependencies {"target":"Hulk"}
 generate_skill_plan {"characterId":42,"target":"Mining II"}
