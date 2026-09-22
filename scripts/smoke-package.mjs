@@ -27,12 +27,14 @@ const toolNames = [
   "get_esi_operation",
   "get_market_snapshot",
   "get_skill_dependencies",
+  "get_zkillmail",
   "initialize_static_data",
   "list_eve_characters",
   "render_eve_map",
   "resolve_eve_entities",
   "resolve_skill_plan_targets",
   "search_esi_operations",
+  "search_zkillmails",
   "select_eve_character",
 ];
 
@@ -588,11 +590,12 @@ async function stdio(
       ).structuredContent;
       assert.equal(dependencies.status, "complete");
       assert.equal(dependencies.staticData.stale, false);
+      assert.equal(dependencies.output.complete, true);
       assert.deepEqual(
-        dependencies.graph.nodes.map(({ key }) => key),
+        dependencies.data.nodes.map(({ key }) => key),
         ["100:1", "100:2", "200:1"],
       );
-      assert.deepEqual(dependencies.graph.edges, [
+      assert.deepEqual(dependencies.data.edges, [
         { from: "100:1", to: "100:2" },
         { from: "100:2", to: "200:1" },
       ]);
@@ -758,7 +761,7 @@ async function run(artifact, prefix, nodeVersion) {
   }
   await assert.rejects(access(directory), { code: "ENOENT" });
   console.log(
-    `Package acceptance passed: ${expected.name}@${expected.version}, ${process.platform}/${process.arch}, Node ${process.versions.node}; 14 tool schemas, SQLite queries, PNG/SVG, restart, offline guard and immediate cleanup`,
+    `Package acceptance passed: ${expected.name}@${expected.version}, ${process.platform}/${process.arch}, Node ${process.versions.node}; ${toolNames.length} tool schemas, SQLite queries, PNG/SVG, restart, offline guard and immediate cleanup`,
   );
 }
 
