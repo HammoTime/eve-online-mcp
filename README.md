@@ -21,7 +21,7 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `get_skill_dependencies` returns a public prerequisite graph with skill-level nodes and prerequisite-to-dependent edges, without login.
 - `generate_skill_plan` computes a personalized, dependency-checked plan from cached requirements and scoped character skills/queue, removes completed levels, and returns training text and estimated remaining SP.
 - `plan_eve_route` computes a complete directed permanent-stargate route or pickup loop, using shortest paths and exact stop optimization. Submit all stops and constraints together; the MCP owns ordering and totals. It returns a private expiring `routeId`.
-- `render_eve_map` renders that `routeId` unchanged, with server-rendered itinerary pages for dense maps. Context maps use an explicit boundary and points of interest. Raw route arrays are rejected. Request `preview:"png"` for inline images; SVG originals are MCP resources. The assistant must never compute, merge or draw substitute routes or skill plans. See [cartography](docs/cartography.md).
+- `render_eve_map` renders that `routeId` unchanged, with a larger padded canvas for crowded maps and plain route text if rendering fails. Context maps use an explicit boundary and points of interest. Raw route arrays are rejected. Request `preview:"png"` for inline images; SVG originals are MCP resources. The assistant must never compute, merge or draw substitute routes or skill plans. See [cartography](docs/cartography.md).
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
 - `plan_eve_skills` interprets activity/class goals, resolves material choices, and calls the deterministic planning tools. It explains practical support, optional upgrades and eligibility limits.
@@ -276,8 +276,9 @@ loop. The default `stopOrder:"optimize"` computes the exact minimum-jump order;
 visits, uses public cached permanent-stargate data, and fails explicitly if a
 complete route cannot be produced. It makes no live safety or cargo guarantee.
 
-Pass its returned `routeId` to `render_eve_map` with `preview:"png"`. Dense maps
-return server-rendered itinerary pages; follow `nextPage` with the same ID.
+Pass its returned `routeId` to `render_eve_map` with `preview:"png"`. Crowded maps
+retry on a larger padded canvas. If rendering fails, the complete stored route
+remains available as text.
 Never concatenate pairwise ESI routes, merge plans, generate solving/drawing
 scripts, or trim route steps. Missing or failed tools mean the limitation must
 be reported. The MCP is the sole planning authority.

@@ -277,11 +277,11 @@ it("renders SQLite neighborhoods after publication and restart, retaining SVG wh
           .routeId;
         const routeMap = await client.callTool({
           name: "render_eve_map",
-          arguments: { routeId, layout: "itinerary", preview: "none" },
+          arguments: { routeId, preview: "none" },
         });
         expect(routeMap.isError).not.toBe(true);
         expect(routeMap.structuredContent).toMatchObject({
-          layout: { used: "itinerary" },
+          layout: { used: "atlas" },
           route: { totalJumps: 3 },
           summary: {
             routes: [
@@ -300,7 +300,8 @@ it("renders SQLite neighborhoods after publication and restart, retaining SVG wh
         renderPreview.mockRestore();
       }
     }
-    expect(prepare).toHaveBeenCalledTimes(2);
+    // Both context and route maps now load geometry on each side of the restart.
+    expect(prepare).toHaveBeenCalledTimes(4);
     expect(loadCatalog).not.toHaveBeenCalled();
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(getAccessToken).not.toHaveBeenCalled();

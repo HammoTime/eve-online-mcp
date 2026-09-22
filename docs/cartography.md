@@ -9,8 +9,8 @@ explicit order, while the default `optimize` finds the minimum-jump order.
 stargates do not establish live safety, docking access or cargo capacity.
 
 Pass its returned `routeId` unchanged to `render_eve_map` with `preview:"png"`.
-Raw route arrays are rejected. Dense maps become server-rendered itinerary pages;
-follow the returned page indices with the same ID. Never assemble, repair, merge,
+Raw route arrays are rejected. Crowded maps retry on a larger padded canvas.
+If no readable map fits, the error includes the complete stored route as text. Never assemble, repair, merge,
 optimize or redraw routes in assistant reasoning or scripts. Missing tools or
 failed results require reporting the limitation. See the shared
 [architecture and limits](../lib/docs/route-planning.md).
@@ -87,9 +87,10 @@ reported. Selected nodes and important labels are never silently dropped.
 - Route maps use only `routeId`, with presentation options. No boundary, POI or
   route-array overrides are accepted with an ID. Repeated transit visits and the
   complete plan remain unchanged. A zero-jump route is valid.
-- Atlas routes over 100 visits, dense layouts or a changed geometry snapshot use
-  numbered itinerary pages of at most 25 visits. Consecutive pages overlap by one
-  visit to preserve every jump. `page` is zero-based; `layout:"itinerary"` is explicit.
+- Crowded route maps automatically retry at 3200 x 2000 with extra padding.
+  Routes over 100 visits, irreducibly dense layouts or changed geometry snapshots
+  return an explicit error with complete route text. Itinerary images and page
+  inputs are no longer supported.
 - Geometry or full POI text that cannot fit at readable size returns `MAP_TOO_DENSE`.
   Input count limits are ceilings, not a promise every maximum-sized composition fits.
 
@@ -100,7 +101,7 @@ reported. Selected nodes and important labels are never silently dropped.
   for every selected system, otherwise whole-view X/Z. Deterministic collision
   separation is capped at 24 SVG pixels and disclosed. Geographic coordinates never
   move. Coincident nodes that cannot be displayed honestly fail explicitly.
-- `size`: `standard` (1440 x 900, default) or `wide` (1600 x 900).
+- `size`: `standard` (1440 x 900, default), `wide` (1600 x 900), or `large` (3200 x 2000 with extra padding).
 - `title`: optional, at most 100 characters.
 - `preview`: `none` (default) or opt-in `png`.
 
@@ -113,8 +114,7 @@ anchors, and the SVG preserves its aspect ratio when resized. DejaVu Sans is pre
 to match the bundled PNG font, with standard sans-serif fallbacks in other viewers.
 Security is shown approximately to two decimal places;
 full raw values remain in SVG tooltips. **No safety classification is inferred from
-raw rounding.** Context activity labels are caller annotations; route paths and
-itinerary labels are server-computed. Route `minimumSecurity` uses the raw value.
+raw rounding.** Context activity labels are caller annotations; route paths are server-computed. Route `minimumSecurity` uses the raw value.
 
 ## Output and inline display
 
