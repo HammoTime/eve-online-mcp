@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.11.0...v1.0.0) (2026-09-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* initialize_static_data is removed. Planning target metadata is now selected through response.path=[resolvedTargets] instead of an unbounded top-level field.
+
+### Features
+
+* streamline tools and automatic static-data setup ([#68](https://github.com/HammoTime/eve-online-mcp/issues/68)) ([bf5971d](https://github.com/HammoTime/eve-online-mcp/commit/bf5971dc064f29f4e0df8fb6e9b8b2a3bbab676b))
+
 ## [0.11.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.10.0...v0.11.0) (2026-09-22)
 
 
