@@ -1,18 +1,27 @@
-# Render existing plans as SVG maps
+# Server-computed routes and SVG maps
 
-`render_eve_map` is a renderer, **not a planning tool**. Other tools or the user
-provide the boundary, points of interest and any already-ordered routes. The
-renderer never chooses destinations, calculates paths, repairs missing links,
-reorders visits, recommends activities or changes game state. It does not call
-ESI or authenticate an EVE character. It reads cached public CCP SDE geography.
+`plan_eve_route` owns complete directed paths, exact stop optimization and totals.
+Submit `origin`, `destination`, every required `stop`, and constraints together
+(the array field is `stops`). The tool accepts up to 12 stops and 250 route visits.
+Use the origin as destination for a loop; `stopOrder:"as_given"` preserves an
+explicit order, while the default `optimize` finds the minimum-jump order.
+`avoid` and raw-SDE `minimumSecurity` are hard constraints. Static permanent
+stargates do not establish live safety, docking access or cargo capacity.
 
-This supersedes the earlier proposed `generate_eve_map` interface: there are no
-`from`, `to`, `via`, `avoid` or `preference` arguments. The explicit `neighborhood`
-boundary selects one permanent-stargate hop; it is not a route planner.
+Pass its returned `routeId` unchanged to `render_eve_map` with `preview:"png"`.
+Raw route arrays are rejected. Dense maps become server-rendered itinerary pages;
+follow the returned page indices with the same ID. Never assemble, repair, merge,
+optimize or redraw routes in assistant reasoning or scripts. Missing tools or
+failed results require reporting the limitation. See the shared
+[architecture and limits](../lib/docs/route-planning.md).
+
+Context maps remain available with an explicit boundary and points of interest,
+without a route overlay. Both tools read cached public CCP SDE data and need no
+ESI call or character login. They write private artifacts, never game state.
 
 ## Input
 
-Both `boundary` and `pointsOfInterest` are required. Pass an empty list when no
+For context maps both `boundary` and `pointsOfInterest` are required. Pass an empty list when no
 points are needed. All names are exact, case-insensitive and whitespace-trimmed,
 within the requested category. Numeric values are IDs; numeric strings are names,
 not implicitly converted IDs. Ambiguous/unknown names fail without selecting one.
@@ -33,10 +42,7 @@ not implicitly converted IDs. Ambiguous/unknown names fail without selecting one
       "label": "Supplied destination"
     }
   ],
-  "routes": [
-    { "label": "Supplied illustration", "systems": ["Jita", "Maurasi"] }
-  ],
-  "title": "Kimotoro / route illustration",
+  "title": "Kimotoro / context map",
   "theme": "dark",
   "layout": "atlas",
   "size": "standard",
@@ -67,23 +73,23 @@ For example, `{"boundary":{"kind":"neighborhood","center":"Jita","jumps":1},"poi
 needs one map call and no ESI lookup calls. `jumps` defaults to 1; other depths are
 rejected. Incoming-only links are included without inventing reverse route hops.
 
-POIs and every route visit must fall inside the explicit boundary. A mismatch
+POIs must fall inside the explicit context boundary. A mismatch
 returns an error, never silent expansion. Bounds exceeding 250 systems are rejected
 rather than partially rendering a region as if complete. Low-priority labels may
 be omitted for legibility; their count and the number of external connections are
 reported. Selected nodes and important labels are never silently dropped.
 
-### Points of interest and routes
+### Points of interest and route rendering
 
 - Up to 12 POIs. Each has `system`, `label` (1-60 characters), optional `note`
   (1-160 characters), and `kind`: `activity` (default), `staging`, `waypoint`, or
   `warning`. The numbered list is included in the SVG, with corresponding markers.
-- Up to 3 supplied routes of 1-100 visits each. Each route has an ordered `systems`
-  list and optional `label`. Only adjacent directed permanent-gate hops are accepted.
-- Repeated nonconsecutive system visits and caller route order are retained. A
-  nonexistent connection is rejected; no path is calculated to fill the gap.
-- A repeated _consecutive_ system is not a gate hop and is rejected. A single-system
-  route is valid and has zero jumps.
+- Route maps use only `routeId`, with presentation options. No boundary, POI or
+  route-array overrides are accepted with an ID. Repeated transit visits and the
+  complete plan remain unchanged. A zero-jump route is valid.
+- Atlas routes over 100 visits, dense layouts or a changed geometry snapshot use
+  numbered itinerary pages of at most 25 visits. Consecutive pages overlap by one
+  visit to preserve every jump. `page` is zero-based; `layout:"itinerary"` is explicit.
 - Geometry or full POI text that cannot fit at readable size returns `MAP_TOO_DENSE`.
   Input count limits are ceilings, not a promise every maximum-sized composition fits.
 
@@ -107,7 +113,8 @@ anchors, and the SVG preserves its aspect ratio when resized. DejaVu Sans is pre
 to match the bundled PNG font, with standard sans-serif fallbacks in other viewers.
 Security is shown approximately to two decimal places;
 full raw values remain in SVG tooltips. **No safety classification is inferred from
-raw rounding.** All route and activity labels are caller annotations.
+raw rounding.** Context activity labels are caller annotations; route paths and
+itinerary labels are server-computed. Route `minimumSecurity` uses the raw value.
 
 ## Output and inline display
 
@@ -173,7 +180,7 @@ annotations and travel plans may be sensitive. Telemetry omits requested routes,
 notes, SVG/PNG contents and artifact handles. Such diagnostic captures are partial,
 not fully replayable. stdout remains reserved for MCP protocol traffic.
 
-Budgets: 250 selected systems, 100 visits per route, 3 routes, 12 POIs, 1 MB SVG,
+Budgets: 250 context systems, 12 POIs, 12 route stops, 250 route visits, 1 MB SVG,
 1.5 MB PNG before base64, and 5 MB serialized MCP result. Preview dimensions may be
 reduced once to meet byte limits, but never at the expense of the primary SVG. At
 most two native previews execute concurrently per adapter. The renderer uses fixed
@@ -195,6 +202,7 @@ npm pack --dry-run
 
 Examples are written below ignored `artifacts/cartography/`; they are not packaged.
 Run the library's `npm run validate` separately in its devcontainer as well. Tests
-cover strict renderer-only schema, no route repair, boundary enforcement, directed
+cover strict route-handle inputs, exact route optimization, no assistant route
+overrides, boundary enforcement, directed
 adjacency, stale/corrupt caches, deterministic geometry, escaped text, POI overflow,
 artifact hashing/retention/symlink safety, real PNG output and mixed MCP delivery.

@@ -14,6 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalMapArtifacts } from "../src/map-artifacts.js";
+import { planRoute } from "../lib/src/route-plan.js";
+import { routeFixture } from "../lib/test/route-fixtures.js";
+import { renderItinerary } from "../lib/src/cartography/itinerary.js";
 import {
   MAP_LIMITS,
   type MapDataStatus,
@@ -60,6 +63,31 @@ describe("local map artifacts", () => {
   });
   afterEach(async () => {
     await rm(temporary, { recursive: true, force: true });
+  });
+
+  it("persists a complete route across restart and refuses expired or inconsistent plans", async () => {
+    const graph = routeFixture();
+    graph.source = source;
+    const plan = planRoute(graph, { origin: 1, destination: 4 });
+    const artifact = await store.put(renderItinerary(plan), source);
+    expect(
+      JSON.parse(
+        (
+          await new LocalMapArtifacts({ directory, now }).read(
+            artifact.id,
+            "manifest.json",
+          )
+        ).text,
+      ).routePlan,
+    ).toEqual(plan);
+    await expect(
+      store.put(
+        { ...renderItinerary(plan), routePlan: { ...plan, totalJumps: 99 } },
+        source,
+      ),
+    ).rejects.toThrow();
+    now.mockReturnValue(epoch + 8 * 24 * 60 * 60 * 1000);
+    await expect(store.read(artifact.id, "manifest.json")).rejects.toThrow();
   });
 
   it("publishes matching UTF-8 hashes, metadata and resource URIs readable after restart", async () => {

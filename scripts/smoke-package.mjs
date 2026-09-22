@@ -30,6 +30,7 @@ const toolNames = [
   "get_zkillmail",
   "initialize_static_data",
   "list_eve_characters",
+  "plan_eve_route",
   "render_eve_map",
   "resolve_eve_entities",
   "resolve_skill_plan_targets",

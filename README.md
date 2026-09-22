@@ -1,6 +1,6 @@
 # EVE Online MCP
 
-A read-only [Model Context Protocol](https://modelcontextprotocol.io/) server for the complete EVE Online ESI API surface. It lets an AI assistant discover live ESI capabilities, inspect exact parameters and OAuth requirements, retrieve public or character data, and turn that context into practical plans for your next adventure.
+A read-only [Model Context Protocol](https://modelcontextprotocol.io/) server for EVE Online, with the complete ESI API surface, public zKillboard killmails, skill planning and map rendering. It lets an AI assistant retrieve public or character data and turn that context into practical plans for your next adventure.
 
 The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 document. Today it exposes all `GET`/`HEAD` routes plus an explicitly audited allowlist of semantically read-only `POST` lookups (bulk ID/name resolution, affiliations, CSPA calculation, and asset name/location lookup). Every state-changing operation is excluded.
 
@@ -14,11 +14,14 @@ The server is generated at runtime from a pinned copy of CCP's OpenAPI 3.1 docum
 - `resolve_eve_entities` performs one exact-only public batch lookup from names to every matching ID/category, or from IDs to names/categories. Ambiguous and unresolved values remain explicit.
 - `get_character_context` retrieves only the requested `profile`, `location`, `ship`, `skills`, `skillQueue`, and/or `wallet` sections for an explicit character ID, with per-section data, freshness, and errors.
 - `get_market_snapshot` collects bounded pages of public regional orders for one type, optionally filters one exact location, and returns observed aggregates with honest completeness warnings.
+- `search_zkillmails` searches public zKillboard killmails by character, corporation, alliance, ship or location, with kill/loss, time-window and space filters. No EVE login is required.
+- `get_zkillmail` retrieves one public zKillboard killmail by ID, including victim, attackers and `zkb` metadata. Both tools return bounded results with explicit freshness and incomplete-history warnings.
 - `initialize_static_data` downloads and validates CCP's official static data into a local cache, reports its build/freshness, and checks for updates on request. Startup also initializes in the background.
 - `resolve_skill_plan_targets` resolves exact skill/ship names or type IDs against the cache, including explicit skill levels and unique singular skill names. Ambiguous or unresolved inputs return candidates.
 - `get_skill_dependencies` returns a public prerequisite graph with skill-level nodes and prerequisite-to-dependent edges, without login.
 - `generate_skill_plan` computes a personalized, dependency-checked plan from cached requirements and scoped character skills/queue, removes completed levels, and returns training text and estimated remaining SP.
-- `render_eve_map` renders an existing plan as an SVG with an explicit map boundary, a numbered points-of-interest list and optional supplied routes. It never creates plans, chooses destinations or calculates routes. The local app stores private generated artifacts and optionally returns a PNG preview for inline-capable hosts; SVG originals are available through MCP resource reads. See [cartography](docs/cartography.md).
+- `plan_eve_route` computes a complete directed permanent-stargate route or pickup loop, using shortest paths and exact stop optimization. Submit all stops and constraints together; the MCP owns ordering and totals. It returns a private expiring `routeId`.
+- `render_eve_map` renders that `routeId` unchanged, with server-rendered itinerary pages for dense maps. Context maps use an explicit boundary and points of interest. Raw route arrays are rejected. Request `preview:"png"` for inline images; SVG originals are MCP resources. The assistant must never compute, merge or draw substitute routes or skill plans. See [cartography](docs/cartography.md).
 - `eve-esi://catalog` describes pinned API coverage, excluded operation count, and guidance for the generic and focused workflows.
 - `plan_eve_adventure` is a prompt for evidence-based recommendations with costs, preparation, risk, travel, and a concrete first action. Its optional activity playbooks cover exploration, factional warfare, mining, industry, trading, hauling, agent missions, PvE, and PvP.
 - `plan_eve_skills` interprets activity/class goals, resolves material choices, and calls the deterministic planning tools. It explains practical support, optional upgrades and eligibility limits.
@@ -32,6 +35,40 @@ wire requests with 64 waiters each, and a 30-second wire/body deadline. Each wai
 can cancel independently, including with telemetry disabled. Cancellation does not
 interrupt refresh-token persistence. Protected pagination preserves an explicit
 acting character even when served from cache.
+
+## zKillboard killmail integration
+
+Available from **0.10.0**, `search_zkillmails` and `get_zkillmail` work immediately
+after configuring the MCP server. No zKillboard API key or EVE login is needed.
+After upgrading an existing installation, restart or reconnect the MCP host to
+refresh its tool list; the server exposes 17 tools.
+
+Ask your assistant: "Show public zKillboard killmails in Jita from the past 24
+hours." It should first resolve the system with `resolve_eve_entities`, then
+call `search_zkillmails`. Example search arguments:
+
+```json
+{
+  "entityType": "solarSystem",
+  "entityId": 30000142,
+  "pastSeconds": 86400,
+  "page": 1
+}
+```
+
+For a known killmail, call `get_zkillmail` with `{"killmailId":138006538}`. It
+returns the public record when available; an unavailable record produces an
+explicit error. The server never submits killmails.
+
+Searches read one upstream page of at most 200 records. Results are cached for
+one hour, and upstream withholds killmails less than five minutes old. Combat
+history is delayed and incomplete; an empty result does not prove a system is
+safe or inactive. `complete:false` describes that historical coverage, while
+`output.complete` describes whether the selected response value was fully returned.
+Follow `output` continuation metadata before requesting the next upstream page.
+
+See the [full zKillboard filters and limits](https://github.com/HammoTime/eve-online-mcp-lib/blob/bbaf2dc134f69c8e716185d8b3d51c3947df8c5f/docs/zkillboard.md)
+and [response-budget and continuation examples](https://github.com/HammoTime/eve-online-mcp-lib/blob/bbaf2dc134f69c8e716185d8b3d51c3947df8c5f/docs/response-budgets.md).
 
 ## Development container
 
@@ -102,15 +139,13 @@ codex mcp list
 
 The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
 
-All 16 tools advertise structured output schemas, matching the shared contracts
+All 17 tools advertise structured output schemas, matching the shared contracts
 used by the hosted server. Successful results retain their direct object shape,
 including explicit partial results and freshness; they are not wrapped in a
 `result` property. Refresh the host's tool listing after an upgrade.
 
-`search_zkillmails` searches public zKillboard combat records by resolved entity
-ID; `get_zkillmail` retrieves a known killmail ID without an EVE login. Results
-are delayed, incomplete historical evidence. See [zKillboard usage and limits](lib/docs/zkillboard.md).
-Tool responses use [bounded model-facing slices](lib/docs/response-budgets.md);
+For public combat history, see [zKillboard killmail integration](#zkillboard-killmail-integration).
+Tool responses use [bounded model-facing slices](https://github.com/HammoTime/eve-online-mcp-lib/blob/bbaf2dc134f69c8e716185d8b3d51c3947df8c5f/docs/response-budgets.md);
 follow `output` continuation metadata for omitted details. Map PNG previews now
 require `preview: "png"`; SVG remains the primary artifact.
 
@@ -226,14 +261,23 @@ Do not commit tokens or client secrets. Tool responses never include the token, 
 
 ## Suggested usage
 
-### Visualize an existing plan
+### Plan and visualize a route
 
-Give `render_eve_map` a required `boundary` and `pointsOfInterest` list (use `[]`
-for none), plus optional already-ordered `routes`. Boundaries can name systems,
-a one-jump neighborhood, a region, a constellation, or an absolute X/Z extent in light years. References
-are exact names or numeric IDs. The renderer reads public cached SDE geography,
-not character data or a route-planning endpoint. It validates supplied connections
-without repairing, expanding or replanning them.
+Call `plan_eve_route` with exact names or numeric IDs for `origin`, `destination`
+and every required `stop` in `stops`. Use the origin again as destination for a
+loop. The default `stopOrder:"optimize"` computes the exact minimum-jump order;
+`as_given` preserves a requested sequence. Optional `avoid` and raw-SDE
+`minimumSecurity` are hard constraints. The planner supports 12 stops and 250
+visits, uses public cached permanent-stargate data, and fails explicitly if a
+complete route cannot be produced. It makes no live safety or cargo guarantee.
+
+Pass its returned `routeId` to `render_eve_map` with `preview:"png"`. Dense maps
+return server-rendered itinerary pages; follow `nextPage` with the same ID.
+Never concatenate pairwise ESI routes, merge plans, generate solving/drawing
+scripts, or trim route steps. Missing or failed tools mean the limitation must
+be reported. The MCP is the sole planning authority.
+
+For a context map without a route, provide `boundary` and `pointsOfInterest`:
 
 ```json
 {
@@ -241,8 +285,8 @@ without repairing, expanding or replanning them.
   "pointsOfInterest": [
     { "system": "Jita", "kind": "staging", "label": "Departure" }
   ],
-  "routes": [{ "systems": ["Jita", "Maurasi"] }],
-  "theme": "dark"
+  "theme": "dark",
+  "preview": "png"
 }
 ```
 

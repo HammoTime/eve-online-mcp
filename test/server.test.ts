@@ -137,12 +137,15 @@ describe("EVE MCP server", () => {
         readOnlyHint: ![
           "authorize_eve_character",
           "select_eve_character",
+          "plan_eve_route",
           "render_eve_map",
         ].includes(tool.name),
         destructiveHint: false,
-        idempotentHint: !["authorize_eve_character", "render_eve_map"].includes(
-          tool.name,
-        ),
+        idempotentHint: ![
+          "authorize_eve_character",
+          "plan_eve_route",
+          "render_eve_map",
+        ].includes(tool.name),
       });
     }
     expect(fetchImplementation).not.toHaveBeenCalled();
@@ -200,12 +203,15 @@ describe("EVE MCP server", () => {
       "resolve_eve_entities",
       "get_character_context",
       "get_market_snapshot",
+      "plan_eve_route",
       "render_eve_map",
     ]);
-    expect(tools.filter((tool) => tool.name !== "render_eve_map")).toHaveLength(
-      15,
-    );
-    expect(tools).toHaveLength(16);
+    expect(
+      tools.filter(
+        (tool) => !["render_eve_map", "plan_eve_route"].includes(tool.name),
+      ),
+    ).toHaveLength(15);
+    expect(tools).toHaveLength(17);
     for (const tool of tools) {
       expect(tool.outputSchema, tool.name).toMatchObject({ type: "object" });
     }

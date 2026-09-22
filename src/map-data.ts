@@ -199,6 +199,15 @@ export class LocalMapDataSource implements PreparedMapDataSource {
     return this.inFlight;
   }
 
+  async loadRouteGraph(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    await this.ensure(false);
+    signal?.throwIfAborted();
+    const { graph, snapshot } = this.store.routeGraph(signal);
+    this.remember(snapshot, this.warning);
+    return { ...graph, source: this.status(snapshot) };
+  }
+
   async prepare(request: MapRequest, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const input = parseMapRequest(request);
