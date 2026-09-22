@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalMapArtifacts } from "../src/map-artifacts.js";
 import { planRoute } from "../lib/src/route-plan.js";
 import { routeFixture } from "../lib/test/route-fixtures.js";
-import { renderItinerary } from "../lib/src/cartography/itinerary.js";
+import { createRouteArtifact } from "../lib/src/cartography/route-artifact.js";
 import {
   MAP_LIMITS,
   type MapDataStatus,
@@ -69,7 +69,7 @@ describe("local map artifacts", () => {
     const graph = routeFixture();
     graph.source = source;
     const plan = planRoute(graph, { origin: 1, destination: 4 });
-    const artifact = await store.put(renderItinerary(plan), source);
+    const artifact = await store.put(createRouteArtifact(plan), source);
     expect(
       JSON.parse(
         (
@@ -82,7 +82,10 @@ describe("local map artifacts", () => {
     ).toEqual(plan);
     await expect(
       store.put(
-        { ...renderItinerary(plan), routePlan: { ...plan, totalJumps: 99 } },
+        {
+          ...createRouteArtifact(plan),
+          routePlan: { ...plan, totalJumps: 99 },
+        },
         source,
       ),
     ).rejects.toThrow();

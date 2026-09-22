@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import type { MapPreview } from "../lib/src/cartography/service.js";
-import { MapError, MAP_LIMITS } from "../lib/src/cartography/types.js";
+import {
+  MapError,
+  MAP_CANVASES,
+  MAP_LIMITS,
+} from "../lib/src/cartography/types.js";
 
 /** Rasterization is a local adapter, never a shared-core or discovery dependency. */
 export class LocalMapPreview implements MapPreview {
@@ -14,7 +18,7 @@ export class LocalMapPreview implements MapPreview {
       );
     if (
       Buffer.byteLength(svg) > MAP_LIMITS.svgBytes ||
-      ![1440, 1600].includes(width)
+      !Object.values(MAP_CANVASES).some((canvas) => canvas.width === width)
     )
       throw new MapError(
         "MAP_PREVIEW_LIMIT",

@@ -42,7 +42,7 @@ describe("local map preview", () => {
     vi.restoreAllMocks();
   });
 
-  it.each([1440, 1600])(
+  it.each([1440, 1600, 3200])(
     "rasterizes deterministic real PNGs at width %s with every synthetic label visible",
     async (width) => {
       const preview = new LocalMapPreview();
