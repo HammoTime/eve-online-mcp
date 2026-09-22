@@ -75,6 +75,7 @@ it("wires a real SVG artifact and raster preview through the app without ESI, au
       arguments: {
         boundary: { kind: "systems", systems: [1] },
         pointsOfInterest: [{ system: 1, label: "Caller-selected point" }],
+        preview: "png",
       },
     });
     const parsed = mapResultSchema.parse(result.structuredContent);

@@ -102,10 +102,17 @@ codex mcp list
 
 The server advertises EVE Online use cases in every tool's title and description, and returns workflow guidance in the MCP initialization `instructions` field. This lets hosts recognize character sheets, skills, skill queues, markets and other ESI data requests before a prompt or catalog resource is opened. Codex reads these instructions; other hosts may handle them differently. Tool selection remains the host's decision.
 
-All 14 tools advertise structured output schemas, matching the shared contracts
+All 16 tools advertise structured output schemas, matching the shared contracts
 used by the hosted server. Successful results retain their direct object shape,
 including explicit partial results and freshness; they are not wrapped in a
 `result` property. Refresh the host's tool listing after an upgrade.
+
+`search_zkillmails` searches public zKillboard combat records by resolved entity
+ID; `get_zkillmail` retrieves a known killmail ID without an EVE login. Results
+are delayed, incomplete historical evidence. See [zKillboard usage and limits](lib/docs/zkillboard.md).
+Tool responses use [bounded model-facing slices](lib/docs/response-budgets.md);
+follow `output` continuation metadata for omitted details. Map PNG previews now
+require `preview: "png"`; SVG remains the primary artifact.
 
 For a named character's training plan, use `resolve_eve_entities` to select the character-category ID, `resolve_skill_plan_targets` to verify goals, then `generate_skill_plan` with that explicit character ID. The planner retrieves skills and queue itself. `get_character_context` remains available for character inspection, and other ESI questions use `search_esi_operations`, `get_esi_operation`, then `call_esi`. Public discovery needs no login; protected data uses EVE SSO. ESI does not expose Omega subscription status or saved in-game skill plans, and skill injector recommendations require current game rules and explicit assumptions in addition to character data.
 

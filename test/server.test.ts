@@ -185,6 +185,8 @@ describe("EVE MCP server", () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
+      "search_zkillmails",
+      "get_zkillmail",
       "initialize_static_data",
       "resolve_skill_plan_targets",
       "get_skill_dependencies",
@@ -201,9 +203,9 @@ describe("EVE MCP server", () => {
       "render_eve_map",
     ]);
     expect(tools.filter((tool) => tool.name !== "render_eve_map")).toHaveLength(
-      13,
+      15,
     );
-    expect(tools).toHaveLength(14);
+    expect(tools).toHaveLength(16);
     for (const tool of tools) {
       expect(tool.outputSchema, tool.name).toMatchObject({ type: "object" });
     }
@@ -335,12 +337,16 @@ describe("EVE MCP server", () => {
                 {
                   characterId: 42,
                   characterName: "Test Pilot 42",
-                  scopes: trainingScopes,
+                  scopeCount: trainingScopes.length,
                 },
               ],
         defaultCharacterId: name === "select_eve_character" ? 42 : null,
         legacyCredentialPendingMigration: false,
         browserAuthorizationAvailable: true,
+        output: expect.objectContaining({
+          complete: true,
+          returned: name === "list_eve_characters" ? 0 : 1,
+        }),
       });
       expect(result.structuredContent).not.toHaveProperty("result");
       const text = result.content.find((block) => block.type === "text");
@@ -633,7 +639,8 @@ describe("EVE MCP server", () => {
     });
     expect(dependencies.structuredContent).toMatchObject({
       status: "complete",
-      graph: { nodes: expect.any(Array), edges: expect.any(Array) },
+      data: { nodes: expect.any(Array), edges: expect.any(Array) },
+      output: { complete: true },
     });
     const unknown = await client.callTool({
       name: "generate_skill_plan",
@@ -686,14 +693,19 @@ describe("EVE MCP server", () => {
     const client = await connectedClient(esi);
     const result = await client.callTool({
       name: "generate_skill_plan",
-      arguments: { characterId: 42, target: "Mining II" },
+      arguments: {
+        characterId: 42,
+        target: "Mining II",
+        response: { path: ["trainingText"] },
+      },
     });
     expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(
       true,
     );
     expect(result.structuredContent).toMatchObject({
       status: "complete",
-      trainingText: "Mining II",
+      data: "Mining II",
+      output: { complete: true },
       additionalSkillPointsEstimate: 1165,
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
