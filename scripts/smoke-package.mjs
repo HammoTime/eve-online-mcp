@@ -28,7 +28,6 @@ const toolNames = [
   "get_market_snapshot",
   "get_skill_dependencies",
   "get_zkillmail",
-  "initialize_static_data",
   "list_eve_characters",
   "plan_eve_route",
   "render_eve_map",
@@ -559,12 +558,6 @@ async function stdio(
     assert.deepEqual(characters.characters, []);
     assert.equal(characters.defaultCharacterId, null);
     assert.equal(characters.legacyCredentialPendingMigration, false);
-    const status = (await call("initialize_static_data")).structuredContent;
-    assert.equal(status.buildNumber, 123);
-    assert.equal(status.typeCount, 3);
-    assert.equal(status.skillCount, 2);
-    assert.equal(status.stale, false);
-    assert.equal(status.warning, undefined);
     if (previousArtifact)
       assert.equal(
         sha256(await readSvg(previousArtifact.uri)),
@@ -576,6 +569,11 @@ async function stdio(
           targets: [" smoke hull ", "Smoke Mining II"],
         })
       ).structuredContent;
+      assert.equal(resolved.staticData.buildNumber, 123);
+      assert.equal(resolved.staticData.typeCount, 3);
+      assert.equal(resolved.staticData.skillCount, 2);
+      assert.equal(resolved.staticData.stale, false);
+      assert.equal(resolved.staticData.warning, undefined);
       assert.deepEqual(
         resolved.targets.map(({ status, typeId }) => ({ status, typeId })),
         [

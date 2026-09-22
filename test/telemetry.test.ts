@@ -69,7 +69,7 @@ it("writes private local artifacts, exports completion, and closes idempotently"
           versions: options.versions,
           request: {
             method: "tools/call",
-            tool: "initialize_static_data",
+            tool: "resolve_skill_plan_targets",
             arguments: {},
           },
           dependencies: [],
