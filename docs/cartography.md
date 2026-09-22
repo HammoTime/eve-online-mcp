@@ -96,7 +96,7 @@ reported. Selected nodes and important labels are never silently dropped.
   move. Coincident nodes that cannot be displayed honestly fail explicitly.
 - `size`: `standard` (1440 x 900, default) or `wide` (1600 x 900).
 - `title`: optional, at most 100 characters.
-- `preview`: `png` (default) or `none`.
+- `preview`: `none` (default) or opt-in `png`.
 
 The visual style uses circular nodes, thin gate links, round route strokes, restrained
 halos, clear labels and a framed POI rail. Arrows, route identifiers and endpoint
