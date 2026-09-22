@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.0](https://github.com/HammoTime/eve-online-mcp/compare/v1.0.0...v2.0.0) (2026-09-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* render_eve_map no longer accepts the itinerary layout or page. Use atlas/geographic maps and routeText for text itineraries.
+
+### Features
+
+* render larger circuit maps and remove itinerary images ([#70](https://github.com/HammoTime/eve-online-mcp/issues/70)) ([ed18508](https://github.com/HammoTime/eve-online-mcp/commit/ed185085df4d0d2c55099e1709cda8bb85329cf6))
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the eslint group across 1 directory with 2 updates ([#58](https://github.com/HammoTime/eve-online-mcp/issues/58)) ([31fc346](https://github.com/HammoTime/eve-online-mcp/commit/31fc346530730559ac52defe318008d5e37bce0e))
+* **deps:** bump the npm-non-major group with 4 updates ([#63](https://github.com/HammoTime/eve-online-mcp/issues/63)) ([ce60d92](https://github.com/HammoTime/eve-online-mcp/commit/ce60d92db7d70ad5b6bda4cd4343686cb6177db3))
+
 ## [1.0.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.11.0...v1.0.0) (2026-09-22)
 
 
