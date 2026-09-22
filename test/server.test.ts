@@ -137,12 +137,15 @@ describe("EVE MCP server", () => {
         readOnlyHint: ![
           "authorize_eve_character",
           "select_eve_character",
+          "plan_eve_route",
           "render_eve_map",
         ].includes(tool.name),
         destructiveHint: false,
-        idempotentHint: !["authorize_eve_character", "render_eve_map"].includes(
-          tool.name,
-        ),
+        idempotentHint: ![
+          "authorize_eve_character",
+          "plan_eve_route",
+          "render_eve_map",
+        ].includes(tool.name),
       });
     }
     expect(fetchImplementation).not.toHaveBeenCalled();
@@ -185,7 +188,8 @@ describe("EVE MCP server", () => {
     const client = await connectedClient();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
-      "initialize_static_data",
+      "search_zkillmails",
+      "get_zkillmail",
       "resolve_skill_plan_targets",
       "get_skill_dependencies",
       "generate_skill_plan",
@@ -198,12 +202,15 @@ describe("EVE MCP server", () => {
       "resolve_eve_entities",
       "get_character_context",
       "get_market_snapshot",
+      "plan_eve_route",
       "render_eve_map",
     ]);
-    expect(tools.filter((tool) => tool.name !== "render_eve_map")).toHaveLength(
-      13,
-    );
-    expect(tools).toHaveLength(14);
+    expect(
+      tools.filter(
+        (tool) => !["render_eve_map", "plan_eve_route"].includes(tool.name),
+      ),
+    ).toHaveLength(14);
+    expect(tools).toHaveLength(16);
     for (const tool of tools) {
       expect(tool.outputSchema, tool.name).toMatchObject({ type: "object" });
     }
@@ -335,12 +342,16 @@ describe("EVE MCP server", () => {
                 {
                   characterId: 42,
                   characterName: "Test Pilot 42",
-                  scopes: trainingScopes,
+                  scopeCount: trainingScopes.length,
                 },
               ],
         defaultCharacterId: name === "select_eve_character" ? 42 : null,
         legacyCredentialPendingMigration: false,
         browserAuthorizationAvailable: true,
+        output: expect.objectContaining({
+          complete: true,
+          returned: name === "list_eve_characters" ? 0 : 1,
+        }),
       });
       expect(result.structuredContent).not.toHaveProperty("result");
       const text = result.content.find((block) => block.type === "text");
@@ -394,11 +405,11 @@ describe("EVE MCP server", () => {
     );
     await client.listTools();
     const result = await client.callTool({
-      name: "initialize_static_data",
-      arguments: {},
+      name: "resolve_skill_plan_targets",
+      arguments: { target: "Mining II" },
     });
     expect(result.isError).not.toBe(true);
-    expect(result.structuredContent).toEqual({
+    expect(result.structuredContent).toHaveProperty("staticData", {
       buildNumber: data.buildNumber,
       releaseDate: data.releaseDate,
       sourceUrl: data.sourceUrl,
@@ -610,10 +621,10 @@ describe("EVE MCP server", () => {
   it("serves the public cache and dependency graph through MCP without SSO", async () => {
     const client = await connectedClient();
     const cache = await client.callTool({
-      name: "initialize_static_data",
-      arguments: { refresh: true },
+      name: "resolve_skill_plan_targets",
+      arguments: { target: "Mining II" },
     });
-    expect(cache.structuredContent).toMatchObject({
+    expect(cache.structuredContent).toHaveProperty("staticData", {
       buildNumber: 123,
       stale: false,
     });
@@ -633,7 +644,8 @@ describe("EVE MCP server", () => {
     });
     expect(dependencies.structuredContent).toMatchObject({
       status: "complete",
-      graph: { nodes: expect.any(Array), edges: expect.any(Array) },
+      data: { nodes: expect.any(Array), edges: expect.any(Array) },
+      output: { complete: true },
     });
     const unknown = await client.callTool({
       name: "generate_skill_plan",
@@ -686,14 +698,19 @@ describe("EVE MCP server", () => {
     const client = await connectedClient(esi);
     const result = await client.callTool({
       name: "generate_skill_plan",
-      arguments: { characterId: 42, target: "Mining II" },
+      arguments: {
+        characterId: 42,
+        target: "Mining II",
+        response: { path: ["trainingText"] },
+      },
     });
     expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(
       true,
     );
     expect(result.structuredContent).toMatchObject({
       status: "complete",
-      trainingText: "Mining II",
+      data: "Mining II",
+      output: { complete: true },
       additionalSkillPointsEstimate: 1165,
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
@@ -706,7 +723,6 @@ describe("EVE MCP server", () => {
     );
     const client = await connectedClient(undefined, source);
     for (const name of [
-      "initialize_static_data",
       "resolve_skill_plan_targets",
       "get_skill_dependencies",
       "generate_skill_plan",
@@ -714,11 +730,9 @@ describe("EVE MCP server", () => {
       const result = await client.callTool({
         name,
         arguments:
-          name === "initialize_static_data"
-            ? {}
-            : name === "generate_skill_plan"
-              ? { characterId: 42, target: "Mining II" }
-              : { target: "Mining II" },
+          name === "generate_skill_plan"
+            ? { characterId: 42, target: "Mining II" }
+            : { target: "Mining II" },
       });
       expect(result.isError).toBe(true);
       expect(JSON.stringify(result.content)).toContain(

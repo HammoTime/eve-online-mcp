@@ -89,7 +89,7 @@ export class StaticDataCache implements StaticDataSource {
       };
     } catch {
       throw new Error(
-        "Static data is unavailable. Check the local SDE cache configuration and retry initialize_static_data.",
+        "Static data is unavailable. Check the local SDE cache configuration and retry the planning tool.",
       );
     }
   }
@@ -126,7 +126,7 @@ export class StaticDataCache implements StaticDataSource {
           "SDE cache is unavailable; retained the last validated build.",
         );
       throw new Error(
-        "Static data is unavailable. Check the local SDE cache configuration and retry initialize_static_data.",
+        "Static data is unavailable. Check the local SDE cache configuration and retry the planning tool.",
       );
     }
     const age = this.saved
@@ -198,7 +198,7 @@ export class StaticDataCache implements StaticDataSource {
           "Could not check CCP's current SDE; using the last validated local build.",
         );
       throw new Error(
-        "Static data is unavailable. Retry initialize_static_data when CCP is reachable.",
+        "Static data is unavailable. Retry the planning tool when CCP is reachable.",
       );
     }
     if (this.saved && latest.buildNumber < this.saved.metadata.buildNumber)
@@ -268,7 +268,7 @@ export class StaticDataCache implements StaticDataSource {
           "SDE refresh failed validation or download; retained the last validated build.",
         );
       throw new Error(
-        "SDE download or validation failed. No skill plan can be generated; retry initialize_static_data.",
+        "SDE download or validation failed. No skill plan can be generated; retry the planning tool.",
       );
     }
   }
