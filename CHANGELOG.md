@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.10.0...v0.11.0) (2026-09-22)
+
+
+### Features
+
+* enforce MCP-owned route planning and publish usage instructions ([#66](https://github.com/HammoTime/eve-online-mcp/issues/66)) ([6a30501](https://github.com/HammoTime/eve-online-mcp/commit/6a305018e43940442fb8aa8a5fc323750a5c93ad))
+
 ## [0.10.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.9.1...v0.10.0) (2026-09-22)
 
 
