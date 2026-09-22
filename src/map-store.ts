@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import * as z from "zod/v4";
+import { ROUTE_LIMITS, validateRouteGraph } from "../lib/src/route-plan.js";
 import {
   MAP_DATA_LIMITS,
   MapCatalog,
@@ -480,6 +481,59 @@ export class LocalMapStore {
         )
           return current;
         return updateCheck(db, current, checkedAt, etag);
+      }) ?? unavailable()
+    );
+  }
+
+  routeGraph(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    return (
+      this.transaction("read", (db) => {
+        const snapshot = active(db)?.snapshot ?? unavailable();
+        const counts = db
+          .prepare(
+            "SELECT json_array_length(data, '$.systems') AS systems, json_array_length(data, '$.gates') AS gates FROM catalog WHERE id=1",
+          )
+          .get();
+        if (
+          !counts ||
+          typeof counts.systems !== "number" ||
+          counts.systems > ROUTE_LIMITS.systems
+        )
+          throw new MapError(
+            "ROUTE_DATA_LIMIT",
+            "The complete routing graph exceeds its supported bounds.",
+          );
+        const systems = db
+          .prepare(
+            `SELECT s.id, ${safeName("e")} AS name, s.security_status AS securityStatus FROM systems s JOIN entities e ON e.category='system' AND e.id=s.id ORDER BY s.id LIMIT ${ROUTE_LIMITS.systems + 1}`,
+          )
+          .all();
+        const pairs = db
+          .prepare(
+            `SELECT from_id,to_id,forward_count,reverse_count FROM connections ORDER BY from_id,to_id LIMIT ${ROUTE_LIMITS.pairs + 1}`,
+          )
+          .all()
+          .map((row) => [
+            row.from_id,
+            row.to_id,
+            row.forward_count,
+            row.reverse_count,
+          ]);
+        signal?.throwIfAborted();
+        const graph = validateRouteGraph({
+          snapshotId: snapshot.archiveSha256,
+          source: {
+            ...snapshot.source,
+            checkedAt: snapshot.checkedAt,
+            stale: false,
+          },
+          systemCount: counts.systems,
+          gateCount: counts.gates,
+          systems,
+          pairs,
+        });
+        return { graph, snapshot };
       }) ?? unavailable()
     );
   }

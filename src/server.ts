@@ -9,16 +9,22 @@ import { LocalMapArtifacts } from "./map-artifacts.js";
 import { LocalMapPreview } from "./map-preview.js";
 import type { CartographyServices } from "../lib/src/cartography/service.js";
 
+function localCartography(): CartographyServices {
+  const data = new LocalMapDataSource();
+  return {
+    data,
+    routing: data,
+    artifacts: new LocalMapArtifacts(),
+    preview: new LocalMapPreview(),
+  };
+}
+
 export function createEveServer(
   catalog: OperationCatalog,
   client: EsiClient,
   authentication?: CharacterAuthentication,
   staticData: StaticDataSource = new StaticDataCache(),
-  cartography: CartographyServices = {
-    data: new LocalMapDataSource(),
-    artifacts: new LocalMapArtifacts(),
-    preview: new LocalMapPreview(),
-  },
+  cartography: CartographyServices = localCartography(),
 ) {
   return createSharedEveServer(catalog, client, {
     identity: { name: "eve-online-mcp", version: PACKAGE_VERSION },
