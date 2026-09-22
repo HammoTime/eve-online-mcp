@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/HammoTime/eve-online-mcp/compare/v0.9.1...v0.10.0) (2026-09-22)
+
+
+### Features
+
+* add zKillmail tools and bounded context responses ([#64](https://github.com/HammoTime/eve-online-mcp/issues/64)) ([4ee8ecc](https://github.com/HammoTime/eve-online-mcp/commit/4ee8ecc0c69337599ddb1b8a38a1e367040f2f22))
+
+
+### Bug Fixes
+
+* **deps-dev:** bump the vitest group with 2 updates ([#62](https://github.com/HammoTime/eve-online-mcp/issues/62)) ([7895b7c](https://github.com/HammoTime/eve-online-mcp/commit/7895b7cc327f1dd7eafed7227300534576f65bd6))
+* **deps:** bump the npm-non-major group with 4 updates ([#59](https://github.com/HammoTime/eve-online-mcp/issues/59)) ([f6f9b11](https://github.com/HammoTime/eve-online-mcp/commit/f6f9b11140e58a14e391fc270ac26f2ee19e2a05))
+
 ## [0.9.1](https://github.com/HammoTime/eve-online-mcp/compare/v0.9.0...v0.9.1) (2026-09-14)
 
 
