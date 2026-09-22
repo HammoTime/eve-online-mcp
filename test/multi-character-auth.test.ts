@@ -162,7 +162,7 @@ describe("multi-character authentication through MCP", () => {
         {
           characterId: 43,
           characterName: "Test Pilot 43",
-          scopes: trainingScopes,
+          scopeCount: trainingScopes.length,
         },
       ],
     });
@@ -170,6 +170,13 @@ describe("multi-character authentication through MCP", () => {
       /refreshToken|accessToken|fake-refresh|test-client/u,
     );
     expect(login).toHaveBeenCalledOnce();
+    const withScopes = await client.callTool({
+      name: "list_eve_characters",
+      arguments: { includeScopes: true },
+    });
+    expect(withScopes.structuredContent).toMatchObject({
+      characters: [{ characterId: 43, scopes: trainingScopes }],
+    });
     const selected = await client.callTool({
       name: "select_eve_character",
       arguments: { characterId: 43 },

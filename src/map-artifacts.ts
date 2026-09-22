@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import * as z from "zod/v4";
+import { routePlanSchema } from "../lib/src/route-plan.js";
 import { defaultStaticDataDirectory } from "./static-data.js";
 import {
   MapError,
@@ -36,6 +37,7 @@ const manifestSchema = z.object({
   title: z.string(),
   source: z.record(z.string(), z.json()),
   summary: z.record(z.string(), z.json()),
+  routePlan: routePlanSchema.optional(),
 });
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -150,6 +152,7 @@ export class LocalMapArtifacts implements MapArtifactStore {
         title: map.title,
         source,
         summary: map.summary,
+        ...(map.routePlan ? { routePlan: map.routePlan } : {}),
       }),
     );
     if (Buffer.byteLength(manifest) > 100_000)

@@ -15,6 +15,7 @@ import {
   type MapRequest,
 } from "../lib/src/cartography/types.js";
 import { LocalMapStore, MAP_DATABASE_FILE } from "../src/map-store.js";
+import { planRoute } from "../lib/src/route-plan.js";
 
 const directories: string[] = [];
 const checkedAt = "2026-09-09T00:00:00.000Z";
@@ -95,6 +96,28 @@ async function setup(data = fixture()) {
     store,
   };
 }
+
+it("loads one complete directed routing snapshot and detects missing projection rows", async () => {
+  const { store, catalog, path } = await setup();
+  store.publish(catalog, metadata);
+  const { graph } = store.routeGraph();
+  expect(graph.systemCount).toBe(5);
+  expect(graph.gateCount).toBe(7);
+  expect(
+    planRoute(graph, { origin: "Delta", destination: "Epsilon", stops: [2] })
+      .path,
+  ).toEqual([4, 1, 2, 3, 5]);
+  expect(() => planRoute(graph, { origin: 5, destination: 4 })).toThrow(
+    "No permanent-stargate",
+  );
+  const abort = new AbortController();
+  abort.abort();
+  expect(() => store.routeGraph(abort.signal)).toThrow();
+  sql(path, (db) => {
+    db.exec("DELETE FROM connections WHERE from_id=2 AND to_id=3");
+  });
+  expect(() => store.routeGraph()).toThrow("every gate");
+});
 function sql(path: string, operation: (db: DatabaseSync) => void) {
   const db = new DatabaseSync(path);
   try {

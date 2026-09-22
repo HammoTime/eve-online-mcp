@@ -68,13 +68,14 @@ it("wires a real SVG artifact and raster preview through the app without ESI, au
     await server.connect(b);
     await client.connect(a);
     expect(client.getInstructions()).toContain(
-      "only to visualize an existing plan",
+      "Route maps require routeId from plan_eve_route",
     );
     const result = await client.callTool({
       name: "render_eve_map",
       arguments: {
         boundary: { kind: "systems", systems: [1] },
         pointsOfInterest: [{ system: 1, label: "Caller-selected point" }],
+        preview: "png",
       },
     });
     const parsed = mapResultSchema.parse(result.structuredContent);
@@ -177,6 +178,7 @@ it("renders SQLite neighborhoods after publication and restart, retaining SVG wh
         .mockRejectedValue(new Error("Synthetic rasterizer failure"));
       const server = createEveServer(operations, esi, undefined, skills, {
         data: source,
+        routing: source,
         artifacts: new LocalMapArtifacts({
           directory: join(directory, "artifacts"),
           now: options.now,
@@ -262,6 +264,34 @@ it("renders SQLite neighborhoods after publication and restart, retaining SVG wh
           expect.any(AbortSignal),
         );
         expect(initialize).not.toHaveBeenCalled();
+        const planned = await client.callTool({
+          name: "plan_eve_route",
+          arguments: { origin: 1, destination: 4, stops: [2, 3] },
+        });
+        expect(planned.isError).not.toBe(true);
+        expect(planned.structuredContent).toMatchObject({
+          status: "complete",
+          totalJumps: 3,
+        });
+        const routeId = (planned.structuredContent as { routeId: string })
+          .routeId;
+        const routeMap = await client.callTool({
+          name: "render_eve_map",
+          arguments: { routeId, layout: "itinerary", preview: "none" },
+        });
+        expect(routeMap.isError).not.toBe(true);
+        expect(routeMap.structuredContent).toMatchObject({
+          layout: { used: "itinerary" },
+          route: { totalJumps: 3 },
+          summary: {
+            routes: [
+              {
+                systems: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+                jumps: 3,
+              },
+            ],
+          },
+        });
         previousArtifact = parsed.artifact;
       } finally {
         await Promise.all([client.close(), server.close()]);

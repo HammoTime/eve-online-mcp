@@ -27,12 +27,14 @@ const toolNames = [
   "get_esi_operation",
   "get_market_snapshot",
   "get_skill_dependencies",
-  "initialize_static_data",
+  "get_zkillmail",
   "list_eve_characters",
+  "plan_eve_route",
   "render_eve_map",
   "resolve_eve_entities",
   "resolve_skill_plan_targets",
   "search_esi_operations",
+  "search_zkillmails",
   "select_eve_character",
 ];
 
@@ -556,12 +558,6 @@ async function stdio(
     assert.deepEqual(characters.characters, []);
     assert.equal(characters.defaultCharacterId, null);
     assert.equal(characters.legacyCredentialPendingMigration, false);
-    const status = (await call("initialize_static_data")).structuredContent;
-    assert.equal(status.buildNumber, 123);
-    assert.equal(status.typeCount, 3);
-    assert.equal(status.skillCount, 2);
-    assert.equal(status.stale, false);
-    assert.equal(status.warning, undefined);
     if (previousArtifact)
       assert.equal(
         sha256(await readSvg(previousArtifact.uri)),
@@ -573,6 +569,11 @@ async function stdio(
           targets: [" smoke hull ", "Smoke Mining II"],
         })
       ).structuredContent;
+      assert.equal(resolved.staticData.buildNumber, 123);
+      assert.equal(resolved.staticData.typeCount, 3);
+      assert.equal(resolved.staticData.skillCount, 2);
+      assert.equal(resolved.staticData.stale, false);
+      assert.equal(resolved.staticData.warning, undefined);
       assert.deepEqual(
         resolved.targets.map(({ status, typeId }) => ({ status, typeId })),
         [
@@ -588,11 +589,12 @@ async function stdio(
       ).structuredContent;
       assert.equal(dependencies.status, "complete");
       assert.equal(dependencies.staticData.stale, false);
+      assert.equal(dependencies.output.complete, true);
       assert.deepEqual(
-        dependencies.graph.nodes.map(({ key }) => key),
+        dependencies.data.nodes.map(({ key }) => key),
         ["100:1", "100:2", "200:1"],
       );
-      assert.deepEqual(dependencies.graph.edges, [
+      assert.deepEqual(dependencies.data.edges, [
         { from: "100:1", to: "100:2" },
         { from: "100:2", to: "200:1" },
       ]);
@@ -758,7 +760,7 @@ async function run(artifact, prefix, nodeVersion) {
   }
   await assert.rejects(access(directory), { code: "ENOENT" });
   console.log(
-    `Package acceptance passed: ${expected.name}@${expected.version}, ${process.platform}/${process.arch}, Node ${process.versions.node}; 14 tool schemas, SQLite queries, PNG/SVG, restart, offline guard and immediate cleanup`,
+    `Package acceptance passed: ${expected.name}@${expected.version}, ${process.platform}/${process.arch}, Node ${process.versions.node}; ${toolNames.length} tool schemas, SQLite queries, PNG/SVG, restart, offline guard and immediate cleanup`,
   );
 }
 

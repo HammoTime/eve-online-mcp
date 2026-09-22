@@ -13,7 +13,9 @@ import { loadOpenApiDocument, OperationCatalog } from "./openapi.js";
 import { createEveServer } from "./server.js";
 import { StaticDataCache } from "./static-data.js";
 import { localTelemetry } from "./telemetry.js";
+import { runStaticDataCommand } from "./static-data-command.js";
 
+if (await runStaticDataCommand(process.argv.slice(2))) process.exit(0);
 const document = await loadOpenApiDocument();
 const catalog = new OperationCatalog(document);
 if (await runAuthCommand(process.argv.slice(2), catalog)) process.exit(0);
@@ -61,7 +63,7 @@ void staticData
   })
   .catch(() => {
     console.error(
-      "eve-online-mcp: static data initialization failed; retry initialize_static_data.",
+      "eve-online-mcp: static data initialization failed; retry the planning tool.",
     );
   });
 
