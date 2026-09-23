@@ -3,7 +3,7 @@ version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
-    rebase-strategy: "disabled"
+    rebase-strategy: "auto"
     commit-message:
       prefix: "fix"
       prefix-development: "fix"
@@ -38,7 +38,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    rebase-strategy: "disabled"
+    rebase-strategy: "auto"
     commit-message:
       prefix: "fix"
       include: "scope"
@@ -50,7 +50,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/.devcontainer"
-    rebase-strategy: "disabled"
+    rebase-strategy: "auto"
     commit-message:
       prefix: "fix"
       include: "scope"
