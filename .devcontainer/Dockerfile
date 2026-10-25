@@ -1,4 +1,4 @@
-FROM node:26.12.0-bookworm-slim AS development
+FROM node:26.12.1-bookworm-slim AS development
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates curl git \
