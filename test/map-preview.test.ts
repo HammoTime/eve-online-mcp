@@ -1,10 +1,22 @@
-import type { RenderedImage } from "@resvg/resvg-js";
+import type { RenderedImage, ResvgRenderOptions } from "@resvg/resvg-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalMapPreview } from "../src/map-preview.js";
 import { MAP_LIMITS } from "../lib/src/cartography/types.js";
 
+type RenderedImageLike = Pick<
+  RenderedImage,
+  "width" | "height" | "pixels" | "asPng"
+>;
+
 const { renderAsync } = vi.hoisted(() => ({
-  renderAsync: vi.fn<typeof import("@resvg/resvg-js").renderAsync>(),
+  renderAsync:
+    vi.fn<
+      (
+        svg: string | Buffer,
+        options?: ResvgRenderOptions | null,
+        signal?: AbortSignal | null,
+      ) => Promise<RenderedImageLike>
+    >(),
 }));
 vi.mock("@resvg/resvg-js", () => ({ renderAsync }));
 
@@ -18,7 +30,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="720" v
   <circle cx="720" cy="400" r="10" fill="#66ccff"/>
 </svg>`;
 
-function image(bytes = 16, width = 1440): RenderedImage {
+function image(bytes = 16, width = 1440): RenderedImageLike {
   return {
     width,
     height: width / 2,
@@ -189,7 +201,7 @@ describe("local map preview", () => {
 
   it("allows two active renders, rejects a third, and admits work after completion", async () => {
     const preview = new LocalMapPreview();
-    const complete: ((rendered: RenderedImage) => void)[] = [];
+    const complete: ((rendered: RenderedImageLike) => void)[] = [];
     renderAsync.mockImplementation(
       () => new Promise((resolve) => complete.push(resolve)),
     );
